@@ -172,17 +172,17 @@ export class ClusterConnection {
   }
 
   /**
-   * Request faucet SOL. Only devnet/testnet have faucets.
+   * Request faucet SOL. Blocked on mainnet-beta only.
    *
-   * Reality (Nov 2026): the public RPC endpoints' built-in faucets are
-   * closed (410). Free SOL comes from faucet.solana.com (GitHub-verified UI)
-   * or from RPC providers (Helius/QuickNode keep requestAirdrop working) —
-   * point this connection at a provider RPC URL and this method just works.
+   * Allowed: devnet/testnet (public faucets) and custom endpoints — a local
+   * `solana-test-validator` HAS a faucet, and provider RPCs (Helius etc.)
+   * keep requestAirdrop working. Reality (Nov 2026): the *public* devnet/
+   * testnet endpoints return 410; see FAUCET_UNAVAILABLE for remedies.
    *
    * @returns the airdrop transaction signature
    */
   async requestAirdrop(address: PublicKey, lamports: number): Promise<string> {
-    if (this.cluster !== "devnet" && this.cluster !== "testnet") {
+    if (this.cluster === "mainnet-beta") {
       throw new AirdropNotSupportedError(this.cluster);
     }
     try {

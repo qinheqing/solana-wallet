@@ -38,12 +38,12 @@ export class MainnetNotAllowedError extends SolwalletError {
   }
 }
 
-/** Airdrop requested on a cluster without a faucet. */
+/** Airdrop requested on mainnet-beta (real funds at risk). */
 export class AirdropNotSupportedError extends SolwalletError {
   constructor(cluster: string) {
-    super(`Airdrop is not available on cluster "${cluster}".`, {
+    super(`Airdrop is not allowed on cluster "${cluster}".`, {
       code: "AIRDROP_NOT_SUPPORTED",
-      hint: "Use devnet or testnet for faucet SOL. On mainnet-beta, fund accounts by transferring real SOL.",
+      hint: "Airdrops work on devnet, testnet and localnet validators. On mainnet-beta, fund accounts by transferring real SOL.",
     });
   }
 }

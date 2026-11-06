@@ -85,7 +85,7 @@ describe("ClusterConnection (devnet)", () => {
 });
 
 describe("airdrop restriction", () => {
-  it.each(["mainnet-beta", "custom"] as const)(
+  it.each(["mainnet-beta"] as const)(
     "rejects airdrop on %s without touching RPC",
     async (cluster) => {
       const fake = fakeConnection();
