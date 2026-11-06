@@ -34,3 +34,5 @@ export {
   TransactionSendError,
   type SolwalletErrorOptions,
 } from "./connection/errors.js";
+
+export * from "./wallet/index.js";

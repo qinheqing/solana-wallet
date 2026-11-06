@@ -127,14 +127,14 @@
         "dependencies": [
           "2"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Keypair 生成与 solana-keygen 兼容 JSON 密钥导入/导出",
             "description": "使用 @solana/web3.js Keypair 与 tweetnacl 实现 Ed25519 钱包生成，以及与 solana-keygen 兼容的 JSON 密钥文件（字节数组格式）导入/导出功能",
             "dependencies": [],
-            "details": "实现 WalletService 中的 generateWallet()：调用 Keypair.generate() 生成 Ed25519 密钥对，返回 Keypair 与公钥地址。实现 exportJsonKeyfile(keypair)：输出与 solana-keygen 完全兼容的 JSON 字节数组格式（64 字节数组）。实现 importFromJsonKeyfile(json)：解析并校验字节数组长度为 64，用 Keypair.fromSecretKey 恢复，校验失败时抛出明确错误。文档说明密钥文件权限（unix 0600）建议。",
+            "details": "实现 WalletService 中的 generateWallet()：调用 Keypair.generate() 生成 Ed25519 密钥对，返回 Keypair 与公钥地址。实现 exportJsonKeyfile(keypair)：输出与 solana-keygen 完全兼容的 JSON 字节数组格式（64 字节数组）。实现 importFromJsonKeyfile(json)：解析并校验字节数组长度为 64，用 Keypair.fromSecretKey 恢复，校验失败时抛出明确错误。文档说明密钥文件权限（unix 0600）建议。\n<info added on 2026-11-06T09:44:45.425Z>\n已完成：generateWallet/serializeKeypairJson/parseKeypairJson（导出/导入 API 命名统一为 serializeKeypairJson 与 parseKeypairJson）。parseKeypairJson 对 solana-keygen 64 字节格式做分层校验，非 JSON、非字节数组、长度不为 64、字节超出 0-255 范围四类情况分别抛出独立错误码。密钥一致性校验不自行比对尾部公钥字节，直接依赖 web3.js Keypair.fromSecretKey 内置的 seed↔pub 校验（原因：tweetnacl 会原样保留尾部 32 字节，自比自恒等无校验效果，已踩坑验证）。core 层不做任何文件 I/O，密钥持久化由上层消费者负责，保证浏览器环境兼容。\n</info added on 2026-11-06T09:44:45.425Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：生成的 keypair 公私钥匹配；JSON 导出→导入往返一致性（地址不变）；非法 JSON（长度≠64、非数字元素）抛错；与 solana-keygen 生成的已知向量对比验证格式兼容",
             "parentId": "undefined"
@@ -144,7 +144,7 @@
             "title": "BIP39 助记词导入与 BIP44 派生路径实现",
             "description": "基于 bip39 与 ed25519-hd-key 实现助记词导入校验、钱包恢复，以及可配置的 BIP44 派生路径（默认 m/44'/501'/0'/0'）",
             "dependencies": [],
-            "details": "实现 importFromMnemonic(mnemonic, {path, passphrase?})：用 bip39.validateMnemonic 校验助记词合法性（支持 12/24 词），非法助记词抛出明确错误；用 ed25519-hd-key 的 derivePath 从 mnemonicToSeed 派生私钥，Keypair.fromSeed 取前 32 字节。默认派生路径 m/44'/501'/0'/0'，允许自定义路径参数并校验路径格式。同一助记词+同一路径必须确定性恢复出同一地址。",
+            "details": "实现 importFromMnemonic(mnemonic, {path, passphrase?})：用 bip39.validateMnemonic 校验助记词合法性（支持 12/24 词），非法助记词抛出明确错误；用 ed25519-hd-key 的 derivePath 从 mnemonicToSeed 派生私钥，Keypair.fromSeed 取前 32 字节。默认派生路径 m/44'/501'/0'/0'，允许自定义路径参数并校验路径格式。同一助记词+同一路径必须确定性恢复出同一地址。\n<info added on 2026-11-06T09:45:17.757Z>\n依赖与实现补充：助记词库选用 @scure/bip39 v2，注意 wordlist 导入路径必须带 .js 后缀，即从 @scure/bip39/wordlists/english.js 导入，否则 ESM/TS 解析会失败；派生库选用 ed25519-hd-key v2，遵循 SLIP-0010 标准，derivePath 返回 32 字节 IL，可直接作为 Keypair.fromSeed 的 seed。新增 DERIVATION_PRESETS 预设映射：solana、phantom、solanaSecond（对应各主流钱包标准路径），importFromMnemonic 的 path 参数既可传预设名，也可透传任意自定义路径字符串，自定义路径仍需校验 BIP44 格式合法性。冻结黄金值测试向量：12 词助记词 abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about 在默认路径 m/44'/501'/0'/0' 下派生地址必须等于 HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk，用于防止依赖升级或实现改动导致地址漂移。支持 BIP39 passphrase：passphrase 参数透传至 mnemonicToSeedSync，空 passphrase 为默认行为，不同 passphrase 必须派生出不同地址。\n</info added on 2026-11-06T09:45:17.757Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：固定测试助记词（非生产资产）派生地址与已知向量一致；同一助记词多次派生结果一致；非法助记词抛错；自定义路径（如 m/44'/501'/1'/0'）产生不同地址",
             "parentId": "undefined"
@@ -157,7 +157,7 @@
               1,
               2
             ],
-            "details": "实现 EncryptedStore：encrypt(data, password) 生成随机 16 字节 salt 与 12 字节 IV，scrypt/PBKDF2 从密码派生 AES-256 密钥，AES-256-GCM 加密并附加 authTag，输出 {version, salt, iv, authTag, ciphertext} JSON 落盘；decrypt(encrypted, password) 解密，authTag 校验失败（密码错误/数据篡改）抛专用错误。实现 exportPlaintext(id, confirm: true)：confirm 不为 true 时拒绝导出。整合子任务 1/2 的钱包数据为统一存储/加载接口。",
+            "details": "实现 EncryptedStore：encrypt(data, password) 生成随机 16 字节 salt 与 12 字节 IV，scrypt/PBKDF2 从密码派生 AES-256 密钥，AES-256-GCM 加密并附加 authTag，输出 {version, salt, iv, authTag, ciphertext} JSON 落盘；decrypt(encrypted, password) 解密，authTag 校验失败（密码错误/数据篡改）抛专用错误。实现 exportPlaintext(id, confirm: true)：confirm 不为 true 时拒绝导出。整合子任务 1/2 的钱包数据为统一存储/加载接口。\n<info added on 2026-11-06T09:45:35.773Z>\n实施记录（已完成，与原设计存在以下偏离）：1）密钥派生未采用 scrypt，统一使用 PBKDF2-SHA256，600,000 次迭代（依据 OWASP 2023 推荐）；原因：scrypt 不在 WebCrypto 标准算法集中，而 core 需兼容浏览器运行环境（PRD F7.4 要求纯前端调用）。2）AES-256-GCM 加解密改用 WebCrypto 全局 API（crypto.subtle）实现，替代 node:crypto，保证浏览器与 Node 同构可用。3）tsconfig 的 lib 增加 DOM，仅为获取 WebCrypto 类型定义，不引入任何运行时 DOM 依赖。4）GCM authTag 由 WebCrypto 自动附加在 ciphertext 内部，落盘 JSON 结构相应调整为 {version, salt, iv, ciphertext}，不再含独立 authTag 字段，解密时由 API 内部完成完整性校验。5）密码错误与数据篡改导致的解密失败抛出同一专用错误，错误消息完全统一，避免攻击者通过可区分的失败信息构建解密 oracle。exportPlaintext 的显式 confirm: true 门控及子任务 1/2 钱包数据的统一存储/加载接口均按原设计完成并通过测试。\n</info added on 2026-11-06T09:45:35.773Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：加密→解密往返数据一致；错误密码解密抛错；篡改 ciphertext 后解密抛错（GCM authTag 失败）；confirm 缺省或为 false 时导出被拒绝",
             "parentId": "undefined"
@@ -169,7 +169,7 @@
             "dependencies": [
               1
             ],
-            "details": "基于 Task 2 的 ClusterConnection 实现 BalanceService：getSolBalance(address, commitment) 调用 connection.getBalance 并按 lamports→SOL 换算；getTokenBalances(address) 调用 connection.getTokenAccountsByOwner 两次（分别传 TOKEN_PROGRAM_ID 与 TOKEN_2022_PROGRAM_ID），解析每个 token account 的 mint、amount、decimals，按 program 分组合并返回，支持按 mint 过滤。查询只读，复用可配置 commitment 策略。",
+            "details": "基于 Task 2 的 ClusterConnection 实现 BalanceService：getSolBalance(address, commitment) 调用 connection.getBalance 并按 lamports→SOL 换算；getTokenBalances(address) 调用 connection.getTokenAccountsByOwner 两次（分别传 TOKEN_PROGRAM_ID 与 TOKEN_2022_PROGRAM_ID），解析每个 token account 的 mint、amount、decimals，按 program 分组合并返回，支持按 mint 过滤。查询只读，复用可配置 commitment 策略。\n<info added on 2026-11-06T09:45:54.515Z>\n新增统一入口 getWalletBalance(address, commitment?)：以 Promise.all 并行发起 connection.getBalance（SOL 余额，lamports→SOL 换算）与两次 getParsedTokenAccountsByOwner（分别传 TOKEN_PROGRAM_ID 与 TOKEN_2022_PROGRAM_ID，替代原 getTokenAccountsByOwner 手动解析方案），直接读取解析结果中的 mint、amount、decimals；同一 mint 分布于多个 token account 时用 BigInt 累加聚合，避免浮点精度丢失；返回结构中 raw amount 一律保留字符串形式；uiAmount 仅为展示用途的派生字段，不参与任何计算或聚合逻辑；聚合结果按 programId 标注来源，并支持按 mint 过滤。\n</info added on 2026-11-06T09:45:54.515Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：mock Connection 返回两个 program 的账户数据，验证聚合结果包含双方余额且字段正确；空账户返回空列表不报错；devnet 可选集成测试（airdrop 后 SOL 余额一致）",
             "parentId": "undefined"
@@ -184,7 +184,7 @@
               3,
               4
             ],
-            "details": "实现 redact/sanitize 工具：定义 SafeWalletView 等仅含地址/余额等公开字段的输出类型；sanitizeError 确保异常信息不含密钥字节、助记词片段、密码；日志 redact 函数替换敏感字符串。对全模块编写安全断言测试：遍历 generate/import/export/decrypt/balance 所有公开返回值与错误信息，断言不含私钥 64 字节序列、助记词单词、密码字符串。补充边界测试：无效助记词、错误密码、损坏密钥文件的错误处理路径。",
+            "details": "实现 redact/sanitize 工具：定义 SafeWalletView 等仅含地址/余额等公开字段的输出类型；sanitizeError 确保异常信息不含密钥字节、助记词片段、密码；日志 redact 函数替换敏感字符串。对全模块编写安全断言测试：遍历 generate/import/export/decrypt/balance 所有公开返回值与错误信息，断言不含私钥 64 字节序列、助记词单词、密码字符串。补充边界测试：无效助记词、错误密码、损坏密钥文件的错误处理路径。\n<info added on 2026-11-06T09:46:03.526Z>\n完成情况：已实现 toSafeWalletView 输出脱敏器（仅暴露地址/余额/mint 等公开字段）、shortAddress 短地址展示工具、assertNoSecrets 测试助手（可检测 json-bytes、hex、base64 三种形态的私钥泄漏）。安全断言测试已验证：错误消息中不含助记词片段，加密 keystore 中不含明文私钥。全模块共 49 个测试全部通过。\n</info added on 2026-11-06T09:46:03.526Z>",
             "status": "pending",
             "testStrategy": "Vitest 安全断言测试：JSON.stringify 所有公开 API 返回值，断言不含私钥字节数组、助记词文本与密码；错误对象字符串化后同样断言；与 Task 14 验收时复查钱包模块覆盖率",
             "parentId": "undefined"
@@ -192,7 +192,8 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 5,
-        "expansionPrompt": "将任务3拆分为：1) Keypair 生成与 solana-keygen 兼容 JSON 密钥导入/导出；2) BIP39 助记词导入与 BIP44 派生路径（bip39 + ed25519-hd-key）；3) AES-256-GCM 加密存储与显式 confirm 导出机制；4) SOL/SPL/Token2022 余额查询（getBalance + getTokenAccountsByOwner 双 program）；5) 输出脱敏器设计与全模块安全断言测试。"
+        "expansionPrompt": "将任务3拆分为：1) Keypair 生成与 solana-keygen 兼容 JSON 密钥导入/导出；2) BIP39 助记词导入与 BIP44 派生路径（bip39 + ed25519-hd-key）；3) AES-256-GCM 加密存储与显式 confirm 导出机制；4) SOL/SPL/Token2022 余额查询（getBalance + getTokenAccountsByOwner 双 program）；5) 输出脱敏器设计与全模块安全断言测试。",
+        "updatedAt": "2026-11-06T09:46:05.520Z"
       },
       {
         "id": "4",
@@ -991,9 +992,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-06T09:20:09.367Z",
+      "lastModified": "2026-11-06T09:46:05.520Z",
       "taskCount": 14,
-      "completedCount": 2,
+      "completedCount": 3,
       "tags": [
         "master"
       ]

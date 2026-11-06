@@ -11,7 +11,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -21,10 +23,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@scure/bip39": "^2.4.0",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.98.0",
     "@sqds/multisig": "^2.1.4",
-    "bs58": "^6.0.0"
+    "bs58": "^6.0.0",
+    "ed25519-hd-key": "^2.0.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
