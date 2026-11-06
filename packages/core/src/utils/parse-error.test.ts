@@ -41,6 +41,15 @@ describe("parseTransactionError (4.2)", () => {
     expect(p.suggestion).toMatch(/paid RPC/);
   });
 
+  it("maps closed faucets with the web-faucet remedy", () => {
+    const e = new Error(
+      "410 Gone: The RPC faucet is closed on this cluster. Request test SOL at https://faucet.solana.com",
+    );
+    const p = parseTransactionError(e);
+    expect(p.code).toBe("FAUCET_UNAVAILABLE");
+    expect(p.suggestion).toMatch(/faucet\.solana\.com/);
+  });
+
   it("never throws on unparseable shapes", () => {
     expect(parseTransactionError(undefined).code).toBe("UNKNOWN");
     expect(parseTransactionError(42).code).toBe("UNKNOWN");

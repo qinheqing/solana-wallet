@@ -35,6 +35,18 @@ describe("shouldRetrySend (user policy: exponential backoff, 5 retries)", () => 
     expect(shouldRetrySend(expiry, 1, policy)).toBe(false);
   });
 
+  it("never retries deterministic simulation failures (real-world finding)", () => {
+    // Discovered in live devnet usage: unfunded-account failures retried 5×.
+    const debit = new Error(
+      "Simulation failed. Message: Transaction simulation failed: Attempt to debit an account but found no record of a prior credit.",
+    );
+    expect(shouldRetrySend(debit, 1, policy)).toBe(false);
+    expect(
+      shouldRetrySend(new Error("custom program error: 0x1"), 1, policy),
+    ).toBe(false);
+    expect(shouldRetrySend(new Error("AccountNotFound"), 1, policy)).toBe(false);
+  });
+
   it("retries rate limits (429) and server errors (5xx)", () => {
     const rateLimited = new SolanaJSONRPCError({ code: 429, message: "rate limited" });
     const serverDown = new SolanaJSONRPCError({ code: 502, message: "bad gateway" });

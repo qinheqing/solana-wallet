@@ -65,6 +65,12 @@ const RULES: Rule[] = [
     suggestion:
       "Public RPC is throttling. Slow down, batch less, or configure a paid RPC endpoint.",
   },
+  {
+    test: /faucet is closed|faucet.*unavailable/i,
+    code: "FAUCET_UNAVAILABLE",
+    suggestion:
+      "The built-in RPC faucet is closed. request_airdrop falls back to the web faucet API (faucet.solana.com) automatically; if that also fails, request SOL manually at https://faucet.solana.com (rate-limited per IP).",
+  },
 ];
 
 /** Never throws — unparseable errors come back as {code: "UNKNOWN"}. */

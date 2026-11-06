@@ -25,6 +25,7 @@ import { resolveClusterTarget, type Cluster, type ClusterTarget } from "./cluste
 import {
   AirdropNotSupportedError,
   MainnetNotAllowedError,
+  SolwalletError,
   TransactionSendError,
 } from "./errors.js";
 
@@ -74,6 +75,10 @@ export interface SendResult {
   commitment: "confirmed" | "finalized";
 }
 
+/** Failure signatures that are deterministic — retrying cannot succeed. */
+const DETERMINISTIC_SEND_FAILURES =
+  /attempt to debit|accountnotfound|account does not exist|custom program error|insufficient funds|owner.*not match|invalid account|account .* missing|simulation failed.*error/i;
+
 /**
  * Decide whether a failed send attempt should be retried (with exponential
  * backoff handled by the caller: backoffMs * 2^(attempt-1)).
@@ -85,6 +90,8 @@ export interface SendResult {
  *  - Blockhash expiry errors require re-signing with a fresh blockhash,
  *    not resending the same raw transaction.
  *  - RPC 4xx (bad request, etc.) will fail identically — no retry.
+ *  - Deterministic simulation failures (unfunded account, missing accounts,
+ *    program errors) are detected by message and never retried.
  *  - Everything else (network errors, timeouts, 429/5xx) is retried:
  *    resending the same signed transaction is idempotent (same signature,
  *    cannot double-apply on chain).
@@ -108,8 +115,18 @@ export function shouldRetrySend(
   if (error instanceof SolanaJSONRPCError) {
     return typeof error.code === "number" && (error.code === 429 || error.code >= 500);
   }
+  if (error instanceof Error && DETERMINISTIC_SEND_FAILURES.test(error.message)) {
+    return false;
+  }
   // Plain network failures (fetch TypeError, aborts): safe to retry.
   return true;
+}
+
+/** The public RPC faucets return 410 with a pointer to the web faucet. */
+function isFaucetClosedError(error: unknown): boolean {
+  const text =
+    error instanceof Error ? error.message : String(error ?? "");
+  return /faucet is closed|410\b|gone/i.test(text);
 }
 
 export class ClusterConnection {
@@ -156,15 +173,34 @@ export class ClusterConnection {
 
   /**
    * Request faucet SOL. Only devnet/testnet have faucets.
+   *
+   * Reality (Nov 2026): the public RPC endpoints' built-in faucets are
+   * closed (410). Free SOL comes from faucet.solana.com (GitHub-verified UI)
+   * or from RPC providers (Helius/QuickNode keep requestAirdrop working) —
+   * point this connection at a provider RPC URL and this method just works.
+   *
    * @returns the airdrop transaction signature
    */
   async requestAirdrop(address: PublicKey, lamports: number): Promise<string> {
     if (this.cluster !== "devnet" && this.cluster !== "testnet") {
       throw new AirdropNotSupportedError(this.cluster);
     }
-    const signature = await this.connection.requestAirdrop(address, lamports);
-    await this.connection.confirmTransaction(signature, "confirmed");
-    return signature;
+    try {
+      const signature = await this.connection.requestAirdrop(address, lamports);
+      await this.connection.confirmTransaction(signature, "confirmed");
+      return signature;
+    } catch (error) {
+      if (isFaucetClosedError(error)) {
+        throw new SolwalletError(
+          `The ${this.cluster} RPC faucet is closed (public endpoints no longer serve airdrops).`,
+          {
+            code: "FAUCET_UNAVAILABLE",
+            hint: "Three ways to get test SOL: (1) request at https://faucet.solana.com (GitHub-verified, pastes the address there), (2) point this connection at a provider RPC that keeps the faucet enabled — set SOLWALLET_RPC_URL or pass the RPC URL as cluster, (3) import an already-funded wallet with import_wallet.",
+          },
+        );
+      }
+      throw error;
+    }
   }
 
   /**

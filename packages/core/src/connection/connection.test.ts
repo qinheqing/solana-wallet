@@ -61,6 +61,20 @@ describe("ClusterConnection (devnet)", () => {
     expect(fake.confirmTransaction).toHaveBeenCalledOnce();
   });
 
+  it("raises FAUCET_UNAVAILABLE with remedies when the RPC faucet is closed", async () => {
+    // Real-world behavior (Nov 2026): devnet AND testnet RPC faucets return 410.
+    fake.requestAirdrop.mockRejectedValue(
+      new Error("410 Gone: The RPC faucet is closed on this cluster."),
+    );
+    const err = await conn
+      .requestAirdrop(Keypair.generate().publicKey, 2_000_000_000)
+      .catch((e) => e);
+    expect(err.code).toBe("FAUCET_UNAVAILABLE");
+    expect(err.hint).toContain("faucet.solana.com");
+    expect(err.hint).toContain("SOLWALLET_RPC_URL");
+    expect(err.hint).toContain("import_wallet");
+  });
+
   it("sends transactions and returns fee + slot", async () => {
     const result: SendResult = await conn.sendWithRetry(stubTx());
     expect(result.signature).toBe("SIG_TX");
