@@ -7,6 +7,9 @@
  */
 import {
   Connection,
+  SolanaJSONRPCError,
+  TransactionExpiredBlockheightExceededError,
+  TransactionExpiredTimeoutError,
   type SendOptions,
   type VersionedTransaction,
 } from "@solana/web3.js";
@@ -40,7 +43,7 @@ export interface ConfirmPolicy {
 export const DEFAULT_CONFIRM_POLICY: ConfirmPolicy = {
   commitment: "confirmed",
   timeoutMs: 30_000,
-  retries: 3,
+  retries: 5,
   backoffMs: 500,
 };
 
@@ -72,19 +75,41 @@ export interface SendResult {
 }
 
 /**
- * Decide whether a failed send attempt should be retried.
+ * Decide whether a failed send attempt should be retried (with exponential
+ * backoff handled by the caller: backoffMs * 2^(attempt-1)).
  *
- * TODO(user): implement the retry decision — see learning-mode note below.
+ * Policy (user-specified): exponential backoff, up to 5 attempts by default.
+ * Safety rules layered on top:
+ *  - On-chain program failures (TRANSACTION_FAILED) are deterministic —
+ *    resending wastes RPC quota and cannot succeed.
+ *  - Blockhash expiry errors require re-signing with a fresh blockhash,
+ *    not resending the same raw transaction.
+ *  - RPC 4xx (bad request, etc.) will fail identically — no retry.
+ *  - Everything else (network errors, timeouts, 429/5xx) is retried:
+ *    resending the same signed transaction is idempotent (same signature,
+ *    cannot double-apply on chain).
  */
 export function shouldRetrySend(
   error: unknown,
   attempt: number,
   policy: ConfirmPolicy,
 ): boolean {
-  // Placeholder: never retries until implemented (task 2.3).
-  void error;
-  void policy;
-  return attempt < 0;
+  if (attempt >= policy.retries) return false;
+
+  if (error instanceof TransactionSendError && error.code === "TRANSACTION_FAILED") {
+    return false;
+  }
+  if (
+    error instanceof TransactionExpiredBlockheightExceededError ||
+    error instanceof TransactionExpiredTimeoutError
+  ) {
+    return false;
+  }
+  if (error instanceof SolanaJSONRPCError) {
+    return typeof error.code === "number" && (error.code === 429 || error.code >= 500);
+  }
+  // Plain network failures (fetch TypeError, aborts): safe to retry.
+  return true;
 }
 
 export class ClusterConnection {

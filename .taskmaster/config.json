@@ -1,8 +1,8 @@
 {
   "models": {
     "main": {
-      "provider": "claude-code",
-      "modelId": "sonnet",
+      "provider": "anthropic",
+      "modelId": "glm-4.7",
       "maxTokens": 64000,
       "temperature": 0.2
     },
@@ -13,8 +13,8 @@
       "temperature": 0.1
     },
     "fallback": {
-      "provider": "claude-code",
-      "modelId": "sonnet",
+      "provider": "anthropic",
+      "modelId": "glm-4.7",
       "maxTokens": 64000,
       "temperature": 0.2
     }
