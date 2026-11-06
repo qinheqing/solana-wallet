@@ -40,11 +40,14 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
   const sanitize = makeSanitizer(store);
 
   const run =
-    (fn: ToolCallback): ToolHandler =>
+    (fn: ToolCallback, opts?: { bypassSanitizer?: boolean }): ToolHandler =>
     async (args: any): Promise<CallToolResult> => {
       try {
         const result = await fn(args);
-        return { content: [{ type: "text", text: sanitize(result) }] };
+        const text = opts?.bypassSanitizer
+          ? JSON.stringify(result, null, 2)
+          : sanitize(result);
+        return { content: [{ type: "text", text }] };
       } catch (error) {
         const parsed = parseTransactionError(error);
         const payload = {

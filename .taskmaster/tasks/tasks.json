@@ -322,7 +322,7 @@
         "dependencies": [
           "5"
         ],
-        "status": "pending",
+        "status": "in-progress",
         "subtasks": [
           {
             "id": 1,
@@ -386,7 +386,8 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 5,
-        "expansionPrompt": "将任务6拆分为：1) estimateTransactionSize 交易字节估算（序列化模拟）；2) 批量分片算法（指令数 + 1232 字节双约束切分）；3) executeBatchTransfer 串行发送与逐笔结果聚合；4) executeMixedTransfer 多 mint（SOL+SPL+Token2022）单交易指令合并；5) 分片边界测试（N=1000、字节上限触发）与 mock RPC 发送测试。"
+        "expansionPrompt": "将任务6拆分为：1) estimateTransactionSize 交易字节估算（序列化模拟）；2) 批量分片算法（指令数 + 1232 字节双约束切分）；3) executeBatchTransfer 串行发送与逐笔结果聚合；4) executeMixedTransfer 多 mint（SOL+SPL+Token2022）单交易指令合并；5) 分片边界测试（N=1000、字节上限触发）与 mock RPC 发送测试。",
+        "updatedAt": "2026-11-06T11:22:33.802Z"
       },
       {
         "id": "7",
@@ -995,7 +996,7 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-06T10:22:37.218Z",
+      "lastModified": "2026-11-06T11:22:33.802Z",
       "taskCount": 14,
       "completedCount": 5,
       "tags": [

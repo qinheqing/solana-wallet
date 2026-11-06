@@ -69,3 +69,27 @@ export {
   type TransferRequest,
   type TransferResult,
 } from "./transfer/transfer.js";
+
+export {
+  MAX_TX_BYTES,
+  DEFAULT_HEADROOM_BYTES,
+  DEFAULT_SIZE_BUDGET_BYTES,
+  DEFAULT_MAX_INSTRUCTIONS_PER_TX,
+  estimateTransactionSize,
+  splitIntoBatches,
+  executeBatchTransfer,
+  type BatchItem,
+  type Batch,
+  type BatchSplitOptions,
+  type BatchItemResult,
+  type BatchResult,
+  type BatchTransferOptions,
+} from "./transfer/batch.js";
+
+export {
+  executeMixedTransfer,
+  type MixedLeg,
+  type MixedTransferOptions,
+  type MixedLegSummary,
+  type MixedTransferResult,
+} from "./transfer/mixed.js";

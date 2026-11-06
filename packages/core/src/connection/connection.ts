@@ -195,7 +195,7 @@ export class ClusterConnection {
           `The ${this.cluster} RPC faucet is closed (public endpoints no longer serve airdrops).`,
           {
             code: "FAUCET_UNAVAILABLE",
-            hint: "Three ways to get test SOL: (1) request at https://faucet.solana.com (GitHub-verified, pastes the address there), (2) point this connection at a provider RPC that keeps the faucet enabled — set SOLWALLET_RPC_URL or pass the RPC URL as cluster, (3) import an already-funded wallet with import_wallet.",
+            hint: "Three ways to get test SOL: (1) request at https://faucet.solana.com (GitHub-verified, pastes the address there), (2) pass a provider RPC URL (e.g. Helius) directly as the cluster parameter — they keep the faucet enabled, (3) import an already-funded wallet with import_wallet.",
           },
         );
       }

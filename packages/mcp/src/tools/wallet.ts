@@ -180,6 +180,9 @@ export function registerWalletTools(
           warning: "Store safely; compatible with `solana-keygen pubkey <file>` usage.",
         };
       },
+      // Escape hatch: the caller confirmed via dangerouslyAllowSecretExport.
+      // The sanitizer would otherwise scrub the very payload being exported.
+      { bypassSanitizer: true },
     ),
   );
 

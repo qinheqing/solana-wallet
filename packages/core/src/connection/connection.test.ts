@@ -71,7 +71,7 @@ describe("ClusterConnection (devnet)", () => {
       .catch((e) => e);
     expect(err.code).toBe("FAUCET_UNAVAILABLE");
     expect(err.hint).toContain("faucet.solana.com");
-    expect(err.hint).toContain("SOLWALLET_RPC_URL");
+    expect(err.hint).toContain("cluster parameter");
     expect(err.hint).toContain("import_wallet");
   });
 

@@ -1,12 +1,15 @@
 /**
  * Transfer tools (F4 surface): single / batch / mixed transfers.
- * Amounts are human-readable strings converted by @solwallet/core exactly.
+ * Amounts are human-readable strings converted by @solwallet/core exactly;
+ * batching / merging orchestration lives entirely in core.
  */
 import {
   buildTransferInstructions,
+  executeBatchTransfer,
+  executeMixedTransfer,
   parseAmount,
-  parseTransactionError,
   solToLamports,
+  type BatchItem,
 } from "@solwallet/core";
 import {
   Keypair,
@@ -146,7 +149,7 @@ export function registerTransferTools(
     "batch_transfer",
     {
       description:
-        "Send one token/SOL amount pattern to many recipients. Instructions are chunked into multiple transactions (default ≤5 instructions per tx) sent serially; each chunk reports independently.",
+        "Send one token/SOL amount pattern to many recipients. Core splits them into size-aware batches (instruction count + 1232-byte budget) sent serially; each batch reports per-recipient results.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet paying fees and sending funds."),
         recipients: z
@@ -167,8 +170,12 @@ export function registerTransferTools(
           .min(1)
           .max(10)
           .optional()
-          .describe("Max instructions per transaction. Default 5."),
-        dryRun: z.boolean().optional().describe("Simulate every chunk without sending."),
+          .describe("Max instructions per transaction. Default 8."),
+        onFailure: z
+          .enum(["stop", "continue"])
+          .optional()
+          .describe("'stop' (default): abort after a failed batch, remaining recipients reported as skipped. 'continue': keep sending later batches."),
+        dryRun: z.boolean().optional().describe("Simulate every batch without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
         cluster: clusterParam(z, deps),
       },
@@ -178,63 +185,76 @@ export function registerTransferTools(
       mint?: string;
       decimals?: number;
       chunkSize?: number;
+      onFailure?: "stop" | "continue";
     }) => {
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
       const mint = args.mint ? new PublicKey(args.mint) : undefined;
-      const chunkSize = args.chunkSize ?? 5;
 
-      const built: { to: string; instructions: import("@solana/web3.js").TransactionInstruction[] }[] = [];
+      // Exact amount conversion stays at the MCP layer; instruction
+      // building + splitting + sending are core responsibilities.
+      const items: BatchItem[] = [];
       for (const r of args.recipients) {
         const amount = mint ? parseAmount(r.amount, args.decimals ?? 0) : solToLamports(r.amount);
-        const res = await buildTransferInstructions(conn, {
+        const built = await buildTransferInstructions(conn, {
           payer: from.publicKey,
           destination: new PublicKey(r.to),
           mint,
           amount,
           decimals: args.decimals,
         });
-        built.push({ to: r.to, instructions: res.instructions });
+        items.push({ destination: new PublicKey(r.to), instructions: built.instructions });
       }
 
-      // Chunk per-transaction instruction count, sending serially.
-      const chunks: { to: string; instructions: typeof built[number]["instructions"] }[] = [];
-      for (const b of built) {
-        const last = chunks.at(-1);
-        if (last && last.instructions.length + b.instructions.length <= chunkSize) {
-          last.instructions.push(...b.instructions);
-          last.to += `, ${b.to}`;
-        } else {
-          chunks.push({ to: b.to, instructions: [...b.instructions] });
-        }
-      }
+      const batches = await executeBatchTransfer(conn, from, items, {
+        maxInstructionsPerTx: args.chunkSize,
+        onFailure: args.onFailure,
+        dryRun: args.dryRun,
+        allowMainnet: args.allowMainnet,
+      });
 
-      const results: unknown[] = [];
-      for (const [i, chunk] of chunks.entries()) {
-        try {
-          const r = await sendInstructions(conn, from, chunk.instructions, {
-            dryRun: args.dryRun,
-            allowMainnet: args.allowMainnet,
-          });
-          results.push({ chunk: i + 1, recipients: chunk.to.split(", ").length, ...r });
-        } catch (error) {
-          results.push({
-            chunk: i + 1,
-            recipients: chunk.to.split(", ").length,
-            ...(parseTransactionError(error)),
-            failedChunk: true,
-          });
-          break; // serial: stop at first failed chunk, report the rest as skipped
-        }
-      }
-      const failed = results.filter((r) => (r as { failedChunk?: boolean }).failedChunk).length;
+      const chunks = batches.map((b) => {
+        const firstFailure = b.results.find((r) => r.status === "failed");
+        const ok = b.results.every((r) => r.status === "success");
+        return {
+          chunk: b.batchIndex + 1,
+          recipients: b.results.length,
+          estimatedBytes: b.estimatedBytes,
+          ok,
+          simulatedOnly: args.dryRun === true,
+          signature: b.signatures[0],
+          signatures: b.signatures,
+          slot: b.slot,
+          feeLamports: b.feeLamports,
+          logs: b.logs,
+          failedChunk: firstFailure !== undefined,
+          ...(firstFailure?.error
+            ? {
+                code: firstFailure.error.code,
+                message: firstFailure.error.message,
+                suggestion: firstFailure.error.suggestion,
+              }
+            : {}),
+          results: b.results.map((r) => ({
+            to: r.to,
+            status: r.status,
+            signature: r.signature,
+            ...(r.error
+              ? { code: r.error.code, message: r.error.message, suggestion: r.error.suggestion }
+              : {}),
+          })),
+        };
+      });
+      const failed = chunks.filter((c) => c.failedChunk).length;
+      const skipped = chunks.reduce((n, c) => n + c.results.filter((r) => r.status === "skipped").length, 0);
       return {
         totalRecipients: args.recipients.length,
-        chunks: results,
+        chunks,
+        skippedRecipients: skipped,
         summary:
           failed === 0
-            ? `All ${chunks.length} chunk(s) ${args.dryRun ? "simulated" : "sent"} successfully.`
-            : `${chunks.length - failed}/${chunks.length} chunks succeeded; remaining chunks skipped.`,
+            ? `All ${chunks.length} batch(es) ${args.dryRun ? "simulated" : "sent"} successfully.`
+            : `${chunks.length - failed}/${chunks.length} batches succeeded; ${skipped} recipient(s) skipped.`,
       };
     }),
   );
@@ -276,32 +296,40 @@ export function registerTransferTools(
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
 
-      const allInstructions: import("@solana/web3.js").TransactionInstruction[] = [];
-      const legSummary: Array<{ kind: string; to: string; amount: string }> = [];
-      for (const leg of args.legs) {
-        if (leg.kind === "sol" && (leg.mint || leg.decimals !== undefined)) {
-          throw new Error("sol legs must not set mint/decimals.");
-        }
-        if (leg.kind === "token" && (!leg.mint || leg.decimals === undefined)) {
-          throw new Error("token legs require mint and decimals.");
-        }
-        const amount = leg.kind === "sol" ? solToLamports(leg.amount) : parseAmount(leg.amount, leg.decimals ?? 0);
-        const built = await buildTransferInstructions(conn, {
-          payer: from.publicKey,
-          destination: new PublicKey(leg.to),
-          mint: leg.kind === "token" ? new PublicKey(leg.mint!) : undefined,
-          amount,
-          decimals: leg.decimals,
-        });
-        allInstructions.push(...built.instructions);
-        legSummary.push({ kind: leg.kind, to: leg.to, amount: leg.amount });
-      }
+      // Amount strings → exact base units here; validation, instruction
+      // building (program dispatch + ATA), size guard and sending are core.
+      const legs = args.legs.map((leg) => ({
+        kind: leg.kind,
+        to: new PublicKey(leg.to),
+        amount:
+          leg.kind === "sol" ? solToLamports(leg.amount) : parseAmount(leg.amount, leg.decimals ?? 0),
+        mint: leg.kind === "token" ? new PublicKey(leg.mint!) : undefined,
+        decimals: leg.decimals,
+      }));
 
-      const result = await sendInstructions(conn, from, allInstructions, {
+      const result = await executeMixedTransfer(conn, from, legs, {
         dryRun: args.dryRun,
         allowMainnet: args.allowMainnet,
       });
-      return { ...result, legs: legSummary };
+      return {
+        ok: result.error === undefined,
+        simulatedOnly: result.simulatedOnly,
+        signature: result.signature,
+        slot: result.slot,
+        feeLamports: result.feeLamports,
+        logs: result.logs,
+        unitsConsumed: result.unitsConsumed,
+        ...(result.error ? { error: result.error } : {}),
+        legs: result.legs.map((l, i) => ({
+          kind: l.kind,
+          to: l.to,
+          amount: args.legs[i]?.amount ?? l.amountBaseUnits,
+          amountBaseUnits: l.amountBaseUnits,
+          program: l.program,
+          destinationAtaCreated: l.destinationAtaCreated,
+          destinationAta: l.destinationAta,
+        })),
+      };
     }),
   );
 }

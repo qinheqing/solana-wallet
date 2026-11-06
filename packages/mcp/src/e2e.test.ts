@@ -199,6 +199,35 @@ describe("solwallet MCP server (11.6)", () => {
     await t.cleanup();
   });
 
+  it("export_secret with the flag returns REAL mnemonic and keyfile (bug regression)", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+
+    const mnemonicExport = await t.call("export_secret", {
+      walletName: "w",
+      format: "mnemonic",
+      dangerouslyAllowSecretExport: true,
+    });
+    const mnemonicText = t.text(mnemonicExport);
+    // Regression: sanitizer used to redact this even with the flag set.
+    expect(mnemonicText).toContain('"mnemonic":');
+    expect(mnemonicText).not.toContain("[REDACTED]");
+    // A real 12-word BIP39 phrase (words separated by spaces).
+    const words = JSON.parse(mnemonicText).mnemonic.split(" ");
+    expect(words.length).toBe(12);
+
+    const keyfileExport = await t.call("export_secret", {
+      walletName: "w",
+      format: "keyfileJson",
+      dangerouslyAllowSecretExport: true,
+    });
+    const keyfileText = t.text(keyfileExport);
+    expect(keyfileText).not.toContain("[REDACTED]");
+    const keyfile = JSON.parse(keyfileText).keyfileJson;
+    expect(JSON.parse(keyfile)).toHaveLength(64);
+    await t.cleanup();
+  });
+
   it("transfer tool surfaces structured errors on bad amounts", async () => {
     const t = await setup();
     await t.call("create_wallet", { name: "w" });
