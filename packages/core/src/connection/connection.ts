@@ -1,0 +1,239 @@
+/**
+ * ClusterConnection — wraps @solana/web3.js Connection with:
+ *  - cluster awareness (devnet/testnet/mainnet/custom)
+ *  - health checks & restricted airdrops
+ *  - a configurable confirm/retry policy (sendWithRetry)
+ *  - a mainnet-beta safety guard (allowMainnet)
+ */
+import {
+  Connection,
+  type SendOptions,
+  type VersionedTransaction,
+} from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
+
+/** Minimal shape of getRecentPerformanceSamples() entries. */
+interface PerfSample {
+  samplePeriodSecs: number;
+  numTransactions: bigint | number;
+}
+
+import { resolveClusterTarget, type Cluster, type ClusterTarget } from "./cluster.js";
+import {
+  AirdropNotSupportedError,
+  MainnetNotAllowedError,
+  TransactionSendError,
+} from "./errors.js";
+
+/** How a sent transaction is confirmed and retried. */
+export interface ConfirmPolicy {
+  /** Finality to wait for. `confirmed` is fast; `finalized` is immutable. */
+  commitment: "confirmed" | "finalized";
+  /** Give up waiting after this long (per attempt). */
+  timeoutMs: number;
+  /** Max attempts (1 = send once, never retry). */
+  retries: number;
+  /** Base delay for exponential backoff between attempts. */
+  backoffMs: number;
+}
+
+export const DEFAULT_CONFIRM_POLICY: ConfirmPolicy = {
+  commitment: "confirmed",
+  timeoutMs: 30_000,
+  retries: 3,
+  backoffMs: 500,
+};
+
+export interface ClusterConnectionOptions {
+  /**
+   * Explicit confirmation that mutating operations on mainnet-beta are
+   * intended. Can also be passed per-call; per-call wins.
+   */
+  allowMainnet?: boolean;
+  /** Inject a pre-built Connection (used by tests). */
+  connection?: Connection;
+}
+
+export interface ClusterHealth {
+  cluster: Cluster;
+  rpcUrl: string;
+  slot: number;
+  version: string;
+  /** Approximate transactions per second from recent performance samples. */
+  tps: number;
+}
+
+export interface SendResult {
+  signature: string;
+  slot: number;
+  /** Fee in lamports charged for the transaction. */
+  feeLamports: number;
+  commitment: "confirmed" | "finalized";
+}
+
+/**
+ * Decide whether a failed send attempt should be retried.
+ *
+ * TODO(user): implement the retry decision — see learning-mode note below.
+ */
+export function shouldRetrySend(
+  error: unknown,
+  attempt: number,
+  policy: ConfirmPolicy,
+): boolean {
+  // Placeholder: never retries until implemented (task 2.3).
+  void error;
+  void policy;
+  return attempt < 0;
+}
+
+export class ClusterConnection {
+  readonly target: ClusterTarget;
+  readonly connection: Connection;
+  private readonly defaultAllowMainnet: boolean;
+
+  constructor(
+    target: ClusterTarget,
+    options: ClusterConnectionOptions = {},
+  ) {
+    this.target = target;
+    this.defaultAllowMainnet = options.allowMainnet ?? false;
+    this.connection =
+      options.connection ??
+      new Connection(target.rpcUrl, {
+        commitment: "confirmed",
+      });
+  }
+
+  get cluster(): Cluster {
+    return this.target.cluster;
+  }
+
+  get rpcUrl(): string {
+    return this.target.rpcUrl;
+  }
+
+  /** Aggregate health snapshot: slot, node version, approximate TPS. */
+  async getHealth(): Promise<ClusterHealth> {
+    const [slot, version, samples] = await Promise.all([
+      this.connection.getSlot(),
+      this.connection.getVersion(),
+      this.connection.getRecentPerformanceSamples(10),
+    ]);
+    return {
+      cluster: this.cluster,
+      rpcUrl: this.rpcUrl,
+      slot,
+      version: version["solana-core"] ?? "unknown",
+      tps: estimateTps(samples),
+    };
+  }
+
+  /**
+   * Request faucet SOL. Only devnet/testnet have faucets.
+   * @returns the airdrop transaction signature
+   */
+  async requestAirdrop(address: PublicKey, lamports: number): Promise<string> {
+    if (this.cluster !== "devnet" && this.cluster !== "testnet") {
+      throw new AirdropNotSupportedError(this.cluster);
+    }
+    const signature = await this.connection.requestAirdrop(address, lamports);
+    await this.connection.confirmTransaction(signature, "confirmed");
+    return signature;
+  }
+
+  /**
+   * Send a signed transaction under the confirm policy, guarding mainnet.
+   */
+  async sendWithRetry(
+    signedTx: VersionedTransaction,
+    options: {
+      policy?: Partial<ConfirmPolicy>;
+      allowMainnet?: boolean;
+      sendOptions?: SendOptions;
+    } = {},
+  ): Promise<SendResult> {
+    const policy: ConfirmPolicy = { ...DEFAULT_CONFIRM_POLICY, ...options.policy };
+    this.guardMainnet("send a transaction", options.allowMainnet);
+
+    const raw = signedTx.serialize();
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= policy.retries; attempt++) {
+      try {
+        const signature = await this.connection.sendRawTransaction(raw, options.sendOptions);
+        const latest = await this.connection.getLatestBlockhash(policy.commitment);
+        const confirmation = await this.connection.confirmTransaction(
+          { signature, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
+          policy.commitment,
+        );
+        const status = confirmation.value;
+        const slot = confirmation.context.slot;
+        if (status.err) {
+          throw new TransactionSendError(
+            `Transaction failed on-chain: ${JSON.stringify(status.err)}`,
+            { code: "TRANSACTION_FAILED", signature, hint: "Inspect the program error; simulate with dryRun before resending." },
+          );
+        }
+        const fee = (await this.connection.getFeeForMessage(
+          signedTx.message,
+          policy.commitment,
+        )).value ?? 0n;
+        return {
+          signature,
+          slot,
+          feeLamports: Number(fee),
+          commitment: policy.commitment,
+        };
+      } catch (error) {
+        lastError = error;
+        if (!shouldRetrySend(error, attempt, policy)) break;
+        await sleep(policy.backoffMs * 2 ** (attempt - 1));
+      }
+    }
+
+    const signature =
+      lastError instanceof TransactionSendError ? lastError.signature : undefined;
+    throw new TransactionSendError(
+      `Send failed after ${policy.retries} attempt(s): ${describe(lastError)}`,
+      {
+        code: "SEND_FAILED",
+        signature,
+        hint: "Check RPC health (getHealth), blockhash freshness, and account balances, then retry.",
+        cause: lastError,
+      },
+    );
+  }
+
+  /** Throw unless mainnet usage was explicitly acknowledged. */
+  private guardMainnet(operation: string, allowMainnet?: boolean): void {
+    if (this.cluster === "mainnet-beta") {
+      const allowed = allowMainnet ?? this.defaultAllowMainnet;
+      if (!allowed) throw new MainnetNotAllowedError(this.cluster, operation);
+    }
+  }
+}
+
+/** Mean TPS across recent performance samples (0 when samples are missing). */
+function estimateTps(samples: readonly PerfSample[]): number {
+  if (samples.length === 0) return 0;
+  const totalTx = samples.reduce((sum, s) => sum + Number(s.numTransactions), 0);
+  const totalSecs = samples.reduce((sum, s) => sum + s.samplePeriodSecs, 0);
+  return totalSecs > 0 ? Math.round(totalTx / totalSecs) : 0;
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Create a ClusterConnection from a cluster name or RPC URL. */
+export function createConnection(
+  target: Cluster | string,
+  options: ClusterConnectionOptions = {},
+): ClusterConnection {
+  return new ClusterConnection(resolveClusterTarget(target), options);
+}

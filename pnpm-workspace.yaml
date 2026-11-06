@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Dependencies allowed to run postinstall build scripts (pnpm ≥11 uses
+# the `allowBuilds` map; see https://pnpm.io/settings).
+allowBuilds:
+  bigint-buffer: true
+  bufferutil: true
+  esbuild: true
+  utf-8-validate: true

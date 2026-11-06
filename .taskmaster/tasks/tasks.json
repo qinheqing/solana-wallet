@@ -9,40 +9,48 @@
         "testStrategy": "pnpm install 成功；pnpm test 运行空的 Vitest 通过；tsc --noEmit 编译无误",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
-            "title": "初始化 pnpm workspace 与 monorepo 目录结构",
-            "description": "创建 pnpm-workspace.yaml 与根 package.json，建立 packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet 目录骨架",
+            "title": "初始化 pnpm workspace 与目录结构",
+            "description": "初始化 pnpm workspace monorepo，创建 packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet 目录骨架及各包初始 package.json",
             "dependencies": [],
-            "details": "pnpm init 生成根 package.json（声明 engines: node >=20, packageManager 字段）；创建 pnpm-workspace.yaml 声明 packages/*、apps/*、skills/*；创建各子目录及最小 package.json（core 包命名为 @solwallet/core，无 UI 依赖；其余占位包）；添加 .gitignore、.npmrc、.editorconfig 等基础配置文件",
+            "details": "在项目根目录运行 pnpm init 生成根 package.json（设置 packageManager 字段锁定 pnpm 版本，engines 要求 Node >=20）；创建 pnpm-workspace.yaml，声明 packages/*、apps/*（skills 目录以普通文件夹形式存在，不作为 workspace 包）；依次创建 packages/core、packages/mcp、packages/cpi-program、apps/web 目录；为 core 包创建 package.json，name 设为 @solwallet/core，type 为 module，并声明零 UI 依赖原则（dependencies 中不引入任何 UI 框架）；为其余包创建最小 package.json（name 分别为 @solwallet/mcp、@solwallet/cpi-program、@solwallet/web），main/exports 字段指向 src/index.ts 占位文件；每个包创建 src/ 目录与空的 index.ts 占位文件；skills/solana-wallet 目录创建空 SKILL.md 占位。\n<info added on 2026-11-06T09:09:42.786Z>\n已实施完成：根 package.json 已创建（packageManager 锁定 pnpm@12.18.0，engines 要求 node>=20，private: true，预置 build/test/test:watch/typecheck 脚本，根级 devDependencies 含 typescript ^5.7.0、vitest ^3.0.0、@types/node ^24）；pnpm-workspace.yaml 已创建，声明 packages/* 与 apps/*，并新增 allowBuilds 配置显式允许 4 个带 postinstall 构建脚本的原生依赖（bigint-buffer、bufferutil、esbuild、utf-8-validate）——pnpm v12 起默认阻止依赖运行安装脚本，须显式允许否则 @solana/web3.js 相关原生模块无法构建；目录骨架已就绪：packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet 均已存在。\n</info added on 2026-11-06T09:09:42.786Z>",
             "status": "pending",
-            "testStrategy": "pnpm install 成功且 workspace 各包被正确识别（pnpm -r list 可列出所有子包）"
+            "testStrategy": "运行 pnpm install 无报错；pnpm -r list 能列出所有 workspace 包；目录结构完整包含全部 5 个目标目录",
+            "parentId": "undefined"
           },
           {
             "id": 2,
-            "title": "配置根 tsconfig 与共享 lint 配置",
-            "description": "配置 TypeScript ≥5.5 根 tsconfig（strict、target ES2022）及各包继承配置，添加共享 ESLint/Prettier 配置",
+            "title": "配置根 tsconfig（strict/ES2022）与共享 lint 配置",
+            "description": "配置根 tsconfig.json（strict 模式、target ES2022、moduleResolution bundler），建立各包继承的共享基础配置，并配置共享 ESLint/风格约束",
             "dependencies": [
               1
             ],
-            "details": "根 tsconfig.base.json 设置 strict: true、target ES2022、module moduleResolution bundler/node16、declaration、skipLibCheck；各子包 tsconfig 通过 extends 继承并设置 references 支持项目引用；统一安装 typescript >=5.5、eslint、prettier，提供共享 .eslintrc / eslint.config 与格式化脚本（pnpm lint）",
+            "details": "创建根 tsconfig.base.json：strict: true、target: ES2022、module: ESNext、moduleResolution: bundler、esModuleInterop: true、skipLibCheck: true、forceConsistentCasingInFileNames: true、declaration: true、declarationMap: true、sourceMap: true；根 tsconfig.json 仅做 references 或直接继承 base；packages/core、packages/mcp、packages/cpi-program 各自创建 tsconfig.json extends 根配置（apps/web 可放宽 DOM 相关 lib）；安装 typescript >=5.5 作为根 devDependency；添加共享 lint 配置（根 eslint.config.js，typescript-eslint flat config），覆盖所有 packages 与 apps；根 package.json 添加 scripts：build（tsc -b）、typecheck（tsc --noEmit）、lint、test。\n<info added on 2026-11-06T09:11:24.437Z>\n探索结果显示大部分配置已存在，剩余缺口是：根 `tsconfig.json`（solution-style references）、`eslint.config.js` 共享 lint 配置，以及 `packages/cpi-program` 缺少 tsconfig/package.json。我来补齐这些。`★ Insight ─────────────────────────────────────`\n- `noUncheckedIndexedAccess: true` 让 `arr[i]` 的类型变为 `T | undefined`，对钱包项目尤其关键——密钥字节数组、金额数组的越界访问会在编译期被拦截，而不是运行时产生静默的资金错误。\n- `composite: true` 是 TypeScript 项目引用（project references）的前提，它要求 `declaration: true` 并生成 `.tsbuildinfo`，这样 mcp 包通过 `references` 引用 core 时能获得增量编译和精确的增量检查。\n`─────────────────────────────────────────────────`\n\n先看 cpi-program 目录里有什么，以及 mcp 的 tsconfig。cpi-program 只有 README 占位。现在补齐三项：根 tsconfig.json（solution 文件）、eslint.config.js、cpi-program 包配置。看起来文件写入权限尚未授予。我需要你的确认才能继续写入这些配置文件：\n\n1. **`tsconfig.json`（根目录）** — solution-style references 文件，指向 core/mcp/cpi-program\n2. **`packages/cpi-program/package.json` + `tsconfig.json` + 占位 `src/index.ts`** — 补齐缺失的包配置（否则 `tsc -b` 会因找不到输入而报错）\n3. **`eslint.config.js`** — typescript-eslint flat config（还需 `pnpm add -Dw eslint typescript-eslint` 并添加 `lint` script）\n\n请在权限提示中允许写入，或告诉我是否调整方案。\n</info added on 2026-11-06T09:11:24.437Z>",
             "status": "pending",
-            "testStrategy": "在任一子包写入简单 TS 文件，pnpm exec tsc --noEmit 编译无误；pnpm lint 可运行且无配置报错"
+            "testStrategy": "在任一包中写入临时含类型错误的文件运行 pnpm typecheck 应报错，修正后通过；pnpm lint 可运行且无配置错误；tsc --noEmit 全仓通过",
+            "parentId": "undefined"
           },
           {
             "id": 3,
-            "title": "安装 Solana/MCP 依赖并初始化 Vitest 与基线验证",
-            "description": "安装 @solana/web3.js 1.x、@solana/spl-token、@sqds/multisig、@modelcontextprotocol/sdk、Vitest，配置测试脚本并验证 pnpm install/test/tsc 基线全部通过",
+            "title": "安装 Solana/MCP 依赖、初始化 Vitest 并验证基线",
+            "description": "在 workspace 中安装 @solana/web3.js 1.x、@solana/spl-token、@sqds/multisig、@modelcontextprotocol/sdk 等依赖，初始化 Vitest 测试基础设施并验证 pnpm install/test/tsc 基线全部通过",
             "dependencies": [
+              1,
               2
             ],
-            "details": "在 core 包安装 @solana/web3.js@1、@solana/spl-token、@sqds/multisig；在 mcp 包安装 @modelcontextprotocol/sdk；根目录安装 Vitest 与 vite-tsconfig-paths，配置 vitest.workspace.ts 支持各包独立测试；根 package.json 添加 test/build/dev 脚本；编写各包冒烟测试文件（简单的 passing test），运行 pnpm test 验证全绿、tsc --noEmit 无误",
+            "details": "在 packages/core 安装 @solana/web3.js@^1.x、@solana/spl-token、@sqds/multisig 作为 dependencies（core 保持零 UI 依赖）；在 packages/mcp 安装 @modelcontextprotocol/sdk；根目录安装 vitest 作为 devDependency 并创建根 vitest.config.ts（覆盖 packages/* 与 apps/*，environment: node）；每个核心包添加冒烟测试文件（简单的 expect(true).toBe(true) 级别）以验证测试管线；各包 package.json 添加 test script（vitest run --passWithNoTests）；根 package.json 添加 test script（vitest run 或 pnpm -r test）；最后运行完整基线验证：pnpm install 成功、pnpm test 通过、pnpm typecheck（tsc --noEmit）无误，三项全绿即完成任务 1 验收。\n<info added on 2026-11-06T09:11:42.911Z>\n已完成实施：依赖安装与测试基线全部通过。具体落地版本：packages/core 安装 @solana/web3.js@1.98.x、@solana/spl-token@0.4.x、@sqds/multisig@2.1.4（注意 npm 包版本与链上 V4 程序版本号不同步，V4 程序对应 2.x npm 包）；packages/mcp 安装 @modelcontextprotocol/sdk；根目录安装 vitest@3.x 并创建 vitest.config.ts（覆盖 packages/* 与 apps/*，environment: node）。冒烟测试 2 个编写并全部通过；各包 test script 已配置（vitest run --passWithNoTests）。基线验证结果：pnpm install 成功、pnpm test 2 passed、pnpm typecheck（tsc --noEmit）core/mcp/cpi-program 三包全绿，任务 1 验收标准全部满足。\n</info added on 2026-11-06T09:11:42.911Z>",
             "status": "pending",
-            "testStrategy": "pnpm install 成功；pnpm test 各包空 Vitest 测试通过；pnpm exec tsc --noEmit 编译无误，形成可提交的工程基线"
+            "testStrategy": "pnpm install 无错误完成；pnpm test 运行 Vitest 冒烟测试全部通过；tsc --noEmit 编译无误；pnpm -r list 确认依赖版本符合要求（web3.js 1.x、typescript >=5.5）",
+            "parentId": "undefined"
           }
-        ]
+        ],
+        "complexity": 4,
+        "recommendedSubtasks": 3,
+        "expansionPrompt": "将任务1拆分为子任务：1) 初始化 pnpm workspace 与目录结构（packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet）；2) 配置根 tsconfig（strict、ES2022）与共享 lint 配置；3) 安装 Solana/MCP 相关依赖并初始化 Vitest 测试基础设施；4) 验证 pnpm install/test/tsc 基线通过。",
+        "updatedAt": "2026-11-06T09:11:49.337Z"
       },
       {
         "id": 2,
@@ -52,10 +60,62 @@
         "testStrategy": "Vitest 单元测试：非法 allowMainnet 抛错；mock Connection 测试确认策略重试与超时；devnet 集成测试（标记可选）验证 airdrop 与健康检查",
         "priority": "high",
         "dependencies": [
-          1
+          "1"
         ],
-        "status": "pending",
-        "subtasks": []
+        "status": "in-progress",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "设计 ClusterConnection 类与 createConnection 工厂及集群类型定义",
+            "description": "定义 Cluster 类型（devnet/testnet/mainnet-beta/custom）与 ClusterConnection 类，提供 createConnection(cluster|rpcUrl) 工厂函数，映射官方集群端点并支持自定义 RPC URL。",
+            "dependencies": [],
+            "details": "在 packages/core 中定义 Cluster 类型（'devnet' | 'testnet' | 'mainnet-beta' | 'custom'）与 ClusterConnection 类。工厂 createConnection(target: Cluster | string, opts?) 内部映射官方集群到官方 RPC 端点，自定义 RPC URL 直接透传给 @solana/web3.js Connection。保留 commitment 默认值与后续扩展点。零 UI 依赖，类型用 TypeScript strict 导出。\n<info added on 2026-11-06T09:12:30.679Z>\n实现已完成并落地到 packages/core/src/connection/ 三个模块：cluster.ts 定义 Cluster 四值类型（'mainnet-beta' | 'devnet' | 'testnet' | 'custom'）与 CLUSTER_ENDPOINTS 官方端点映射（基于 clusterApiUrl），resolveClusterTarget() 支持三种输入——官方集群名直接映射端点、任意 http(s) RPC URL（如 Helius/QuickNode）解析为 custom、URL origin 与官方端点一致时反查归为对应官方集群；无效输入抛错并附合法值列表（OFFICIAL_CLUSTERS.join(\", \")）。connection.ts 中 ClusterConnection 构造函数通过 ClusterConnectionOptions.connection 支持测试注入预构建 Connection（默认 commitment 'confirmed'），并额外实现了 getHealth()（并发拉取 slot/version/近 10 个性能样本估算 TPS 返回 ClusterHealth）、requestAirdrop()（仅 devnet/testnet，否则抛 AirdropNotSupportedError）、sendWithRetry()（ConfirmPolicy 确认/重试策略 + mainnet allowMainnet 安全守卫）。errors.ts 建立 SolwalletError 基类（readonly code + hint + cause 字段），派生 MainnetNotAllowedError（MAINNET_NOT_ALLOWED）、AirdropNotSupportedError（AIRDROP_NOT_SUPPORTED）、TransactionSendError（TRANSACTION_FAILED/SEND_FAILED，携带 signature），hint 均给出可执行的修正建议供 MCP/AI 自纠错。配套测试 cluster.test.ts、connection.test.ts 已存在；遗留：shouldRetrySend() 重试判定函数为占位实现（标注 TODO，归入任务 2.3）。\n</info added on 2026-11-06T09:12:30.679Z>",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：createConnection 对三种官方集群返回正确 endpoint；自定义 URL 透传；非法输入抛出明确错误。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现健康检查（slot/版本/TPS）与 airdrop（限 devnet/testnet）",
+            "description": "在 ClusterConnection 上实现 getHealth() 返回 {slot, version, tps}，并实现 requestAirdrop，硬编码限制仅 devnet/testnet 可调用，其他集群抛出明确错误。",
+            "dependencies": [
+              1
+            ],
+            "details": "getHealth() 通过 getSlot、getVersion 并发获取，TPS 通过 getRecentPerformanceSamples 计算或标记为近似值。requestAirdrop(address, lamports) 仅当 cluster 为 devnet/testnet 时允许调用，mainnet-beta 或 custom 直接抛出带清晰信息的错误。",
+            "status": "pending",
+            "testStrategy": "单元测试 mock Connection 返回固定 slot/version/tps；断言 mainnet-beta/custom 上调用 requestAirdrop 抛错；devnet 集成测试（可选标记）验证真实 airdrop。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "实现可配置确认策略 sendWithRetry（commitment/timeout/retries）",
+            "description": "定义确认策略参数 {commitment, timeoutMs, retries}，实现 sendWithRetry 封装交易发送与 confirmTransaction，支持超时与指数退避重试。",
+            "dependencies": [
+              1
+            ],
+            "details": "定义策略类型 {commitment: 'confirmed' | 'finalized', timeoutMs, retries}。sendWithRetry(signedTx, strategy?) 发送交易后用 confirmTransaction 等待确认，超时或网络错误按 retries 指数退避重试，最终失败抛出带 signature 的错误。默认：commitment='confirmed'，timeoutMs=30000，retries=2。",
+            "status": "pending",
+            "testStrategy": "mock Connection：模拟首次确认超时、第二次成功验证重试；超过 retries 抛错；验证默认参数与自定义参数生效。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "实现 mainnet-beta allowMainnet 安全开关",
+            "description": "所有签名/发送路径在 mainnet-beta 集群下要求显式 allowMainnet: true，否则抛出自定义 MainnetNotAllowedError 风险错误。",
+            "dependencies": [
+              1,
+              3
+            ],
+            "details": "检测 cluster 为 mainnet-beta 时，发送方法要求调用方显式传入 allowMainnet: true，否则抛出带风险提示的 MainnetNotAllowedError。allowMainnet 可在 createConnection opts 或每次调用参数中传入；错误信息包含当前集群与规避方式说明。",
+            "status": "pending",
+            "testStrategy": "单元测试：mainnet-beta 下不传 allowMainnet 抛 MainnetNotAllowedError；传 true 正常走 mock 发送流程；devnet/testnet 不受开关影响。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "将任务2拆分为：1) 设计 ClusterConnection 类与 createConnection 工厂及集群类型定义；2) 实现健康检查（slot/版本/TPS）与 airdrop（限 devnet/testnet）；3) 实现可配置确认策略 sendWithRetry（commitment/timeout/retries）；4) 实现 mainnet-beta allowMainnet 安全开关；5) 编写单元与可选 devnet 集成测试。",
+        "updatedAt": "2026-11-06T09:12:03.705Z"
       },
       {
         "id": 3,
@@ -65,10 +125,74 @@
         "testStrategy": "单元测试：keypair 生成、JSON 密钥往返导入导出一致性、助记词恢复地址与 BIP44 路径、AES 加密/解密往返、错误密码解密失败；断言任何返回值不含原始密钥字节",
         "priority": "high",
         "dependencies": [
-          2
+          "2"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Keypair 生成与 solana-keygen 兼容 JSON 密钥导入/导出",
+            "description": "使用 @solana/web3.js Keypair 与 tweetnacl 实现 Ed25519 钱包生成，以及与 solana-keygen 兼容的 JSON 密钥文件（字节数组格式）导入/导出功能",
+            "dependencies": [],
+            "details": "实现 WalletService 中的 generateWallet()：调用 Keypair.generate() 生成 Ed25519 密钥对，返回 Keypair 与公钥地址。实现 exportJsonKeyfile(keypair)：输出与 solana-keygen 完全兼容的 JSON 字节数组格式（64 字节数组）。实现 importFromJsonKeyfile(json)：解析并校验字节数组长度为 64，用 Keypair.fromSecretKey 恢复，校验失败时抛出明确错误。文档说明密钥文件权限（unix 0600）建议。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：生成的 keypair 公私钥匹配；JSON 导出→导入往返一致性（地址不变）；非法 JSON（长度≠64、非数字元素）抛错；与 solana-keygen 生成的已知向量对比验证格式兼容",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "BIP39 助记词导入与 BIP44 派生路径实现",
+            "description": "基于 bip39 与 ed25519-hd-key 实现助记词导入校验、钱包恢复，以及可配置的 BIP44 派生路径（默认 m/44'/501'/0'/0'）",
+            "dependencies": [],
+            "details": "实现 importFromMnemonic(mnemonic, {path, passphrase?})：用 bip39.validateMnemonic 校验助记词合法性（支持 12/24 词），非法助记词抛出明确错误；用 ed25519-hd-key 的 derivePath 从 mnemonicToSeed 派生私钥，Keypair.fromSeed 取前 32 字节。默认派生路径 m/44'/501'/0'/0'，允许自定义路径参数并校验路径格式。同一助记词+同一路径必须确定性恢复出同一地址。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：固定测试助记词（非生产资产）派生地址与已知向量一致；同一助记词多次派生结果一致；非法助记词抛错；自定义路径（如 m/44'/501'/1'/0'）产生不同地址",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "AES-256-GCM 加密存储与显式 confirm 导出机制",
+            "description": "用 node:crypto AES-256-GCM 实现钱包密钥的加密落盘与解密加载，导出明文密钥/助记词时要求显式 confirm: true 参数",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "实现 EncryptedStore：encrypt(data, password) 生成随机 16 字节 salt 与 12 字节 IV，scrypt/PBKDF2 从密码派生 AES-256 密钥，AES-256-GCM 加密并附加 authTag，输出 {version, salt, iv, authTag, ciphertext} JSON 落盘；decrypt(encrypted, password) 解密，authTag 校验失败（密码错误/数据篡改）抛专用错误。实现 exportPlaintext(id, confirm: true)：confirm 不为 true 时拒绝导出。整合子任务 1/2 的钱包数据为统一存储/加载接口。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：加密→解密往返数据一致；错误密码解密抛错；篡改 ciphertext 后解密抛错（GCM authTag 失败）；confirm 缺省或为 false 时导出被拒绝",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "SOL/SPL/Token2022 余额查询（双 program）",
+            "description": "封装余额查询：SOL 用 getBalance，SPL Token 与 Token-2022 用 getTokenAccountsByOwner 同时覆盖两个 program，聚合返回结构化余额结果",
+            "dependencies": [
+              1
+            ],
+            "details": "基于 Task 2 的 ClusterConnection 实现 BalanceService：getSolBalance(address, commitment) 调用 connection.getBalance 并按 lamports→SOL 换算；getTokenBalances(address) 调用 connection.getTokenAccountsByOwner 两次（分别传 TOKEN_PROGRAM_ID 与 TOKEN_2022_PROGRAM_ID），解析每个 token account 的 mint、amount、decimals，按 program 分组合并返回，支持按 mint 过滤。查询只读，复用可配置 commitment 策略。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：mock Connection 返回两个 program 的账户数据，验证聚合结果包含双方余额且字段正确；空账户返回空列表不报错；devnet 可选集成测试（airdrop 后 SOL 余额一致）",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "输出脱敏器设计与全模块安全断言测试",
+            "description": "设计统一输出脱敏器：只输出地址等公开信息，永不输出私钥字节、助记词、密码；并对钱包全模块编写安全断言与边界测试",
+            "dependencies": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "details": "实现 redact/sanitize 工具：定义 SafeWalletView 等仅含地址/余额等公开字段的输出类型；sanitizeError 确保异常信息不含密钥字节、助记词片段、密码；日志 redact 函数替换敏感字符串。对全模块编写安全断言测试：遍历 generate/import/export/decrypt/balance 所有公开返回值与错误信息，断言不含私钥 64 字节序列、助记词单词、密码字符串。补充边界测试：无效助记词、错误密码、损坏密钥文件的错误处理路径。",
+            "status": "pending",
+            "testStrategy": "Vitest 安全断言测试：JSON.stringify 所有公开 API 返回值，断言不含私钥字节数组、助记词文本与密码；错误对象字符串化后同样断言；与 Task 14 验收时复查钱包模块覆盖率",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "将任务3拆分为：1) Keypair 生成与 solana-keygen 兼容 JSON 密钥导入/导出；2) BIP39 助记词导入与 BIP44 派生路径（bip39 + ed25519-hd-key）；3) AES-256-GCM 加密存储与显式 confirm 导出机制；4) SOL/SPL/Token2022 余额查询（getBalance + getTokenAccountsByOwner 双 program）；5) 输出脱敏器设计与全模块安全断言测试。"
       },
       {
         "id": 4,
@@ -78,10 +202,36 @@
         "testStrategy": "Vitest：lamports↔SOL、token units↔显示金额往返测试；大数精度测试；mock 错误对象验证错误码解析与建议输出",
         "priority": "high",
         "dependencies": [
-          3
+          "3"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现 bigint 金额换算 formatAmount/parseAmount 与精度测试",
+            "description": "在 packages/core 中使用 bigint 实现 formatAmount/parseAmount，完成最小单位与展示金额的互换并覆盖精度边界",
+            "dependencies": [],
+            "details": "在 packages/core 新建 src/utils/amount.ts，使用 bigint 实现换算。formatAmount(rawAmount: bigint, decimals: number): string 将最小单位格式化为显示字符串；parseAmount(displayAmount: string, decimals: number): bigint 解析十进制字符串为最小单位，非法输入（多小数点、负数、超精度小数位）抛出明确错误。核心逻辑仅用字符串拆分与 bigint 乘除，禁止使用 number/float 参与换算以避免精度丢失。覆盖 lamports↔SOL（decimals=9）与 SPL token（任意 decimals）场景，含 0、极大值（如 10^18 最小单位）、小数点前后补零等边界。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：lamports↔SOL 与 token units↔显示金额往返测试（format(parse(x))===x）；大数精度测试（超过 Number.MAX_SAFE_INTEGER 的值）；非法输入抛错断言。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现错误解析器：解析 SendTransactionError 程序错误码并生成建议",
+            "description": "捕获 SendTransactionError，解析程序错误码（InsufficientFundsForFee、AccountNotFound 等）并返回 {code, message, suggestion}",
+            "dependencies": [
+              1
+            ],
+            "details": "在 packages/core 新建 src/utils/errors.ts，定义 ParsedProgramError 类型 {code: number|string, message: string, suggestion: string}。实现 parseTransactionError(error: unknown): ParsedProgramError：捕获 @solana/web3.js 的 SendTransactionError，解析 InstructionError 中的程序错误码，映射常见错误（InsufficientFundsForFee、AccountNotFound、InvalidAccountOwner 等）为可读 message 并附建议动作（如增加 SOL 支付手续费、检查账户/ATA 是否存在）。未知错误码回退为通用消息并保留原始信息；非 SendTransactionError 输入包装为未知错误。提供错误码映射表常量便于扩展。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：mock SendTransactionError（含 InstructionError 与日志）验证各已知错误码返回正确的 {code, message, suggestion}；未知错误码与普通 Error 输入的回退行为测试。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 3,
+        "recommendedSubtasks": 2,
+        "expansionPrompt": "将任务4拆分为：1) bigint 金额换算 formatAmount/parseAmount 与精度测试；2) 错误解析器（解析 SendTransactionError 程序错误码并生成建议）。"
       },
       {
         "id": 5,
@@ -91,11 +241,73 @@
         "testStrategy": "单元测试：指令构造正确性（三种 program id）、ATA 开关、dry-run 开关、无 allowMainnet 拒绝发送；devnet 可选集成测试一笔真实转账",
         "priority": "high",
         "dependencies": [
-          2,
-          4
+          "2",
+          "4"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现 getMintProgram：通过 account owner 识别 System/Token/Token2022",
+            "description": "通过查询 mint 账户的 owner 程序，自动识别该 mint 属于 System Program、SPL Token 还是 Token2022。",
+            "dependencies": [],
+            "details": "实现 getMintProgram(mint)：调用 getAccountInfo 获取该 mint 账户的 owner 字段，与 SystemProgram.programId、TOKEN_PROGRAM_ID、TOKEN_2022_PROGRAM_ID 比对，返回对应的 program 枚举与 programId；账户不存在或 owner 无法识别时抛出明确错误。复用 ClusterConnection（任务2）获取账户信息。",
+            "status": "pending",
+            "testStrategy": "单元测试：mock Connection 返回不同 owner 的账户数据，断言返回 System/Token/Token2022；无效 mint 地址与未知 owner 抛错。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现 buildTransferInstruction 三种程序指令分派",
+            "description": "根据识别出的所属程序，将转账指令构造分派到 SystemProgram、SPL Token 或 Token2022 三种不同程序。",
+            "dependencies": [
+              1
+            ],
+            "details": "根据 getMintProgram 的结果构造转账指令：原生 SOL 走 SystemProgram.transfer；SPL Token 与 Token2022 分别用对应程序的 createTransferCheckedInstruction（带 decimals 校验），源与目标 ATA 通过 getAssociatedTokenAddress 推导（Token2022 使用其自己的 ATA program id）。统一封装为 buildTransferInstruction(params) 返回 TransactionInstruction。",
+            "status": "pending",
+            "testStrategy": "单元测试：三种 program 下生成的指令 programId 与数据布局正确；decimals 不匹配时抛错；Token2022 使用正确的 ATA 地址。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "实现 ATA 自动创建（idempotent 指令 + allowAtaCreation 开关）",
+            "description": "使用幂等 ATA 创建指令，并通过 allowAtaCreation 开关控制是否自动为目标账户创建关联代币账户。",
+            "dependencies": [
+              2
+            ],
+            "details": "在组装交易时检查目标 ATA 是否存在；若不存在且 allowAtaCreation 为 true，则前置 createAssociatedTokenAccountIdempotentInstruction（幂等，已存在时为 no-op）；allowAtaCreation 为 false 且 ATA 缺失时抛出明确错误并提示开启开关。Token2022 需使用对应 ATA program id。",
+            "status": "pending",
+            "testStrategy": "单元测试：mock 账户存在/不存在 × 开关开/关 四种组合，断言是否包含幂等 ATA 指令或抛错；幂等指令在账户已存在时仍可安全发送。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "实现 dry-run simulateTransaction（收集 logs/units）",
+            "description": "实现可选的 dry-run 交易模拟：通过 simulateTransaction 收集 logs 与 consumed units，模拟通过后才真正发送。",
+            "dependencies": [
+              2
+            ],
+            "details": "在 ClusterConnection 上封装 dryRun(tx)：构造 VersionedTransaction 后调用 connection.simulateTransaction，收集 logs、unitsConsumed、err；dryRun 开关为 true 时仅模拟不发送，false 时走 sendWithRetry 正常发送。模拟失败时返回完整日志便于排查，不产生链上签名。",
+            "status": "pending",
+            "testStrategy": "单元测试：mock simulateTransaction 返回成功/失败两种结果，断言 logs/units 收集正确；dryRun=true 时断言未调用 sendRawTransaction。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "实现 TransferResult 回执组装与错误解析集成及测试",
+            "description": "整合各环节为完整的 transfer 主流程，组装含签名、slot、费用、日志与错误详情的 TransferResult 回执。",
+            "dependencies": [
+              4
+            ],
+            "details": "整合以上环节为 transfer() 主流程：识别 program → 构建指令（含可选 ATA）→ 可选 dry-run → 签名发送（遵守 allowMainnet，复用任务2的 sendWithRetry）→ 等待确认 → 组装 TransferResult {signature, slot, fee, logs, error?}；发送或确认失败时用任务4的错误解析器转换为用户友好的错误详情填入 error 字段。",
+            "status": "pending",
+            "testStrategy": "单元测试：全流程 mock 验证 TransferResult 字段完整性、fee 计算、错误解析集成；无 allowMainnet 时拒绝发送；devnet 可选集成测试（默认 skip）执行一笔真实转账并断言回执。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "将任务5拆分为：1) getMintProgram：通过 account owner 识别 System/Token/Token2022；2) buildTransferInstruction 三种程序指令分派；3) ATA 自动创建（idempotent 指令 + allowAtaCreation 开关）；4) dry-run simulateTransaction 实现（收集 logs/units）；5) TransferResult 回执组装与错误解析集成；6) 单元测试与可选 devnet 转账集成测试。"
       },
       {
         "id": 6,
@@ -105,10 +317,73 @@
         "testStrategy": "单元测试覆盖分片逻辑：N=1000 接收者的切分数量、字节上限触发切分、混合 mint 指令合并顺序；mock RPC 验证串行发送与逐笔结果聚合",
         "priority": "high",
         "dependencies": [
-          5
+          "5"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现 estimateTransactionSize 交易字节估算（序列化模拟）",
+            "description": "在 core 包中实现交易大小估算函数，通过序列化模拟估算 VersionedTransaction 字节数，供分批算法判断是否超过 1232 字节限制",
+            "dependencies": [],
+            "details": "定义 estimateTransactionSize(instructions: TransactionInstruction[]): number。实现方式：用 TransactionMessage({ payerKey, recentBlockhash: 占位 32 字节, instructions }).compileToV0Message() 后 serialize 测量长度；注意签名数量对前缀的影响（PDA/多签账户需按 meta 计入），占位 blockhash 保证结果确定性；对无法序列化的指令返回明确错误；导出常量 MAX_TX_BYTES = 1232",
+            "status": "pending",
+            "testStrategy": "单元测试：空指令、单条 SOL 转账、多条 SPL 转账的字节数估算；估算结果应为真实序列化结果的保守上界；对比 devnet 真实交易大小验证误差",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现批量分片算法（指令数 + 1232 字节双约束切分）",
+            "description": "实现智能分批算法：将 N 个转账切分为多个批次，每批同时满足指令数上限和交易字节数 ≤1232 双约束",
+            "dependencies": [
+              1
+            ],
+            "details": "定义 splitIntoBatches(items, opts) 纯函数：批内每条转账产生 1 条核心指令（SOL 为 SystemProgram.transfer，SPL 为 token transfer）；先按指令数上限（默认可配 MAX_INSTRUCTIONS_PER_TX）切分，再用 estimateTransactionSize 逐条累加校验，超字节则提前断批；返回 Batch[]，每批附带估算字节数与指令数便于日志与测试",
+            "status": "pending",
+            "testStrategy": "单元测试：N=1000 接收者的切分数量与边界；人为构造大账户列表触发字节上限切分；单条转账自身超过 1232 字节时报错或单独成批的策略验证",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "实现 executeBatchTransfer 串行发送与逐笔结果聚合",
+            "description": "实现批量转账主流程：按分批结果串行循环发送每笔交易，聚合每批次每接收者的执行结果，中途失败可配置继续或中止",
+            "dependencies": [
+              2
+            ],
+            "details": "executeBatchTransfer(connection, keypair, recipients[]): 先调用 splitIntoBatches，然后 for 循环逐批构建并 sendRawTransaction，等确认后再发下一批；返回 Array<{to, amount, signature?, status: 'success'|'failed', error?}>；每批之间可选 delay；复用 Task 2 的 sendWithRetry 与确认策略；区块哈希过期需重取 recentBlockhash",
+            "status": "pending",
+            "testStrategy": "mock RPC 测试：验证串行顺序发送、逐笔结果聚合正确；模拟第 k 批失败时继续/中止两种模式的行为；验证返回数组与输入接收者一一对应",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "实现 executeMixedTransfer 多 mint（SOL+SPL+Token2022）单交易指令合并",
+            "description": "实现混合转账：接收 [{mint|'SOL', to, amount}] 列表，将 SOL 转账 + SPL token 转账 + Token2022 转账指令合并进单个 VersionedTransaction",
+            "dependencies": [
+              1
+            ],
+            "details": "executeMixedTransfer(connection, keypair, items): SOL 项生成 SystemProgram.transfer；SPL/Token2022 项经 getOrCreateATA（复用 Task 5 的 ATA 开关）后生成 transferChecked 或 transfer 指令，Token2022 需用 TOKEN_2022_PROGRAM_ID 构造指令；按输入顺序保持指令顺序；金额换算复用已有 decimals 逻辑；构建 VersionedTransaction 签名发送；指令过多或字节超限时报出 estimateTransactionSize 的明确错误提示改用批量转账",
+            "status": "pending",
+            "testStrategy": "单元测试：混合 mint 指令合并顺序与输入一致；Token2022 与 SPL 指令使用各自正确的 program id；mock RPC 验证 ATA 创建指令前置与最终发送；字节超限时错误信息可读",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "分片边界测试（N=1000、字节上限触发）与 mock RPC 发送测试",
+            "description": "补齐分片边界与发送流程的测试：N=1000 大规模切分、1232 字节上限触发、混合转账多 mint 合并、mock RPC 串行发送与结果聚合，确保 F4.2/F4.3 验收",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "新建 tests/batch-transfer.spec.ts 与 tests/mixed-transfer.spec.ts：覆盖 1000 接收者切分批次数与无遗漏/无重复；构造超长账户列表触发字节约束；估算函数与真实序列化一致性抽查；mock Connection 验证 executeBatchTransfer 逐批串行、失败中断/继续语义、结果数组完整性；executeMixedTransfer 的 SOL+SPL+Token2022 组合用例；统一使用本地测试 fixture，不依赖真实网络",
+            "status": "pending",
+            "testStrategy": "运行 pnpm test 验证全部新增用例通过；用 tsc --noEmit 确认类型无误；覆盖率报告确认分片算法与混合合并逻辑达到高覆盖",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "将任务6拆分为：1) estimateTransactionSize 交易字节估算（序列化模拟）；2) 批量分片算法（指令数 + 1232 字节双约束切分）；3) executeBatchTransfer 串行发送与逐笔结果聚合；4) executeMixedTransfer 多 mint（SOL+SPL+Token2022）单交易指令合并；5) 分片边界测试（N=1000、字节上限触发）与 mock RPC 发送测试。"
       },
       {
         "id": 7,
@@ -118,10 +393,62 @@
         "testStrategy": "anchor test 本地 validator 运行通过；core 集成测试（可选标记）构造 CPI 调用并验证代币到达接收方账户",
         "priority": "medium",
         "dependencies": [
-          1
+          "1"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "初始化 Anchor 项目与程序结构设计",
+            "description": "在 packages/cpi-program 中初始化 Anchor 项目，设计程序骨架与指令结构：MultiTransfer 上下文接收 vault_authority、recipients: Vec<Pubkey>、amounts: Vec<u64>、mint 等参数",
+            "dependencies": [],
+            "details": "使用 anchor init 创建项目并配置 Anchor.toml（program_id、provider.cluster 默认 localnet）。在 lib.rs 中声明 #[program] 模块与 multi_transfer 指令，定义 Accounts 结构：vault token account、vault_authority（signer）、mint、逐 recipient 的关联 token account（remaining_accounts 方式）或显式账户列表；校验 recipients.length == amounts.length，账户所有权与 mint PDA 约束。仅作为 dev/testnet 环境的示例程序，不做升级权限复杂设计。",
+            "status": "pending",
+            "testStrategy": "anchor build 编译通过；anchor test 空 shell 在本地 validator 上成功部署程序",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现 CPI 循环 token::transfer 转账逻辑",
+            "description": "在 multi_transfer 指令中实现 CPI 循环调用 token::transfer，将 vault 中指定数量的代币按 amounts 逐笔转给 recipients",
+            "dependencies": [
+              1
+            ],
+            "details": "引入 anchor-spl token 模块，在循环中遍历 recipients/amounts zip，逐笔通过 CpiContext::new 调用 token::transfer（authority 为 vault_authority，from 为 vault token account，to 为对应 recipient token account）。加入长度一致性断言、金额为零/溢出检查；依赖 Solana 原子性保证任一笔 CPI 失败即整笔指令回滚。保持程序最小化，不含额外业务逻辑。",
+            "status": "pending",
+            "testStrategy": "anchor test：本地 validator 上创建 vault 与多个接收方 ATA，执行 multi_transfer 后断言各接收方余额正确、vault 余额扣减一致",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "编写 build 与 deploy 脚本（localnet/testnet）",
+            "description": "提供 anchor build 构建封装与部署脚本，支持 localnet 与 devnet/testnet 部署，并限制仅在 dev/test 环境执行",
+            "dependencies": [
+              2
+            ],
+            "details": "编写 scripts/build.sh（封装 anchor build，输出 .so 路径）与 scripts/deploy.sh：localnet 模式用 solana program deploy --url localhost；testnet 模式部署到 devnet/testnet，若目标是 mainnet-beta 则直接拒绝并报错（安全护栏）。脚本读取 Keypair 路径环境变量，部署后输出 programId 并同步到 Anchor.toml/前端常量。在 package.json 中加入 build/deploy npm scripts 供 pnpm 调用。",
+            "status": "pending",
+            "testStrategy": "在 localnet（solana-test-validator）上执行 deploy 脚本成功并返回 programId；验证脚本传入 mainnet 时拒绝执行",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "实现 core 侧 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数",
+            "description": "在 @solwallet/core 中导出 deployCpiProgram（仅 dev/testnet 部署 BPF 程序）与 buildCpiTransferInstruction（构造调用该 CPI 程序的交易指令）两个辅助函数",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "deployCpiProgram：接收 ClusterConnection 与 .so 文件路径/buffer，使用 BPF loader（bpf_loader_upgradeable）部署，内部强制校验 cluster 为 devnet/testnet/localnet，mainnet-beta 抛出与 ClusterConnection 一致的风险错误。buildCpiTransferInstruction：根据 programId、vault、authority、recipients、amounts 构造 TransactionInstruction，账户元数据与顺序须与 Anchor Accounts 结构一致（含 remaining_accounts 映射）。导出类型定义并保持 core 零 UI 依赖。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：buildCpiTransferInstruction 生成的 keys/data 结构正确（与 Anchor IDL 账户顺序一致）；deployCpiProgram 在 mainnet-beta 输入下抛错，mock Connection 下 localnet/devnet 流程可调用成功；可选集成测试（标记）构造 CPI 调用验证代币到达接收方账户",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "将任务7拆分为：1) Anchor 项目初始化与程序结构设计（recipients/amounts 指令）；2) 实现 CPI 循环 token::transfer 逻辑；3) build/deploy 脚本（localnet/testnet，限 dev/test）；4) core 侧 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数；5) anchor test 本地 validator 测试与集成验证。"
       },
       {
         "id": 8,
@@ -131,11 +458,73 @@
         "testStrategy": "单元测试：扩展参数校验（费率上限、decimals 边界）、指令组装正确性；devnet 可选集成测试创建带 Transfer Fee 的 mint 并 mintTo/burn",
         "priority": "high",
         "dependencies": [
-          2,
-          4
+          "2",
+          "4"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现 SPL createMint2/initializeMint 基础发币封装",
+            "description": "封装 SPL Token 标准 mint 创建：createMint2/initializeMint，支持配置 decimals、mint authority、freeze authority",
+            "dependencies": [],
+            "details": "使用 @solana/spl-token 的 createMint2 或手动组装 createInitializeMintInstruction：定义 CreateSplMintParams 结构 {decimals, mintAuthority, freezeAuthority?}，校验 decimals 在 0-9 边界、authority 为有效 PublicKey；封装到 createSplMint 函数，内部生成 mint Keypair、计算 rent 豁免最小余额、发送并确认交易，返回 {mint, signature}",
+            "status": "pending",
+            "testStrategy": "单元测试：参数校验（decimals 边界、非法公钥）、指令构造正确性；devnet 可选集成测试创建成功并验证链上 mint 状态",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "定义 Token2022 扩展参数结构与校验",
+            "description": "结构化定义 Token2022 各扩展参数（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）并实现校验逻辑",
+            "dependencies": [],
+            "details": "定义 discriminated union 类型的 Token2022ExtensionParams：TransferFeeConfig {transferFeeBasisPoints, maximumFee}、InterestBearingConfig {rate i8}、NonTransferable、PermanentDelegate {delegate}、DefaultAccountState {frozen} 等；实现 validateExtensions(params) 函数校验费率上限（≤10000 bps）、参数边界与必填字段；类型定义独立成文件供指令组装与 MCP 层复用",
+            "status": "pending",
+            "testStrategy": "单元测试：费率上限边界（0/10000/超限）、rate 与 decimals 边界、非法参数报错信息、合法组合通过校验",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "组装 Token2022 扩展初始化指令序列",
+            "description": "根据结构化扩展参数组装 Token2022 的各 createInitialize*Instruction，按正确顺序拼装交易指令列表",
+            "dependencies": [
+              2
+            ],
+            "details": "使用 @solana/spl-token 的 createInitializeTransferFeeConfigInstruction、createInitializeInterestBearingConfigInstruction、createInitializeNonTransferableMintInstruction、createInitializePermanentDelegateInstruction、createInitializeDefaultAccountStateInstruction 等；按 SPL 官方要求的扩展初始化顺序排布（扩展指令在 InitializeMint 之前）；用 getMintLen([...extensionTypes]) 计算正确的 account space；组装 createAccount + 各 initialize 扩展指令 + initializeMint2 的完整指令序列",
+            "status": "pending",
+            "testStrategy": "单元测试：验证指令序列顺序与数量、account space 计算正确、空扩展列表时退化为标准 mint 初始化",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "集成 Token Metadata 三指令元数据流程",
+            "description": "集成 Token Metadata 三指令流程（create/update/setAuthority），为 Token2022 mint 附加 Name/Symbol/Uri 元数据",
+            "dependencies": [
+              3
+            ],
+            "details": "使用 @solana/spl-token-metadata：封装 createMetadataAccountV3 流程，包括计算 metadata PDA（findMetadataPda）、组装 create、（可选）update、（可选）setAuthority 三步指令；与 Metadata Pointer 扩展（createInitializeMetadataPointerInstruction）配合指向 mint 自身；定义 CreateMetadataParams {name, symbol, uri, additionalMetadata?}，校验 name/symbol 长度与 uri 格式",
+            "status": "pending",
+            "testStrategy": "单元测试：PDA 推导正确性、参数校验（空 name/symbol 拒绝）、指令 keys 布局；devnet 可选测试链上读回元数据字段一致",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "实现 mintTo/burn 统一接口并补齐测试",
+            "description": "封装 mintTo/burn 统一接口，同时兼容 SPL 与 Token2022 mint，并补充单元测试与 devnet 可选集成测试",
+            "dependencies": [
+              1,
+              3,
+              4
+            ],
+            "details": "定义 mintTokens({mint, destination(ATA，可选自动创建), amount, decimals, authority}) 与 burnTokens({mint, account, amount, owner}) 统一签名，内部通过 programId 参数（TOKEN_PROGRAM_ID vs TOKEN_2022_PROGRAM_ID）构造 createMintToInstruction/createBurnInstruction；金额使用最小单位并配合既有金额换算模块；编写 Vitest 单元测试 + devnet 可选集成测试：创建带 Transfer Fee 的 mint → mintTo → burn 全流程",
+            "status": "pending",
+            "testStrategy": "单元测试：金额为 0/负数拒绝、destination 无 ATA 时的处理、SPL 与 Token2022 双 program 路径指令正确；devnet 集成测试覆盖完整 mint→burn 流程",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "将任务8拆分为：1) SPL createMint2/initializeMint 基础封装（decimals/authorities）；2) Token2022 扩展参数结构化定义与校验（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）；3) Token2022 扩展初始化指令组装（各 createInitialize*Instruction）；4) Token Metadata 三指令流程集成；5) mintTo/burn 统一接口；6) 单元测试 + devnet 可选集成测试。"
       },
       {
         "id": 9,
@@ -145,10 +534,61 @@
         "testStrategy": "单元测试：参数校验与 authority 缺失时的错误信息；devnet 可选集成测试完整流程：创建带 fee 的 mint → 更新费率 → 冻结/解冻账户",
         "priority": "medium",
         "dependencies": [
-          8
+          "8"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "TokenManager 类骨架与 authority 校验机制",
+            "description": "创建 TokenManager 类基础结构，统一封装 authority 权限校验机制，为后续各运行时管理操作提供基础。",
+            "dependencies": [],
+            "details": "在 packages/core 中新建 TokenManager 类，构造时接收 ClusterConnection 与 payer Keypair。定义 AuthorityType 映射与统一的 assertAuthority(owner, requiredAuthority) 方法：通过 getMint 读取 mint 的 authority 字段与扩展状态，校验当前钱包 pubkey 是否持有对应 authority（mintAuthority/freezeAuthority），不满足时抛出带上下文的明确错误，包含缺失的 authority 类型、当前钱包地址与建议（如需先执行 setAuthority 转移权限）。预留 setTransferFee、freezeAccount 等公共方法签名供后续子任务填充实现。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：mock getMint 返回不同 authority，断言 assertAuthority 在匹配时不抛错、不匹配时抛出的错误信息包含 authority 类型与当前钱包地址及建议内容。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现 setTransferFee 与 freeze/thawAccount",
+            "description": "实现 setTransferFee（按 epoch 生效）与 freezeAccount/thawAccount 冻结解冻功能。",
+            "dependencies": [
+              1
+            ],
+            "details": "基于任务8已建立的 Token2022 基础封装 setTransferFee(mint, transferFeeBasisPoints, maxFee)：构造 TransferFee 配置指令并在 JSDoc 中注明新费率在下一 epoch 开始时生效。实现 freezeAccount/thawAccount：先经 assertAuthority 校验当前钱包持有 freezeAuthority，再构造对应指令，支持 ATA 与普通 token account，返回 VersionedTransaction 并复用 ClusterConnection 的 sendWithRetry 与可配置确认策略。",
+            "status": "pending",
+            "testStrategy": "单元测试：参数越界（fee>10000、负数 maxFee）抛错；freeze 缺少 freezeAuthority 时错误信息明确；devnet 可选集成测试：创建带 Transfer Fee 的 mint → 更新费率 → 冻结/解冻账户并验证账户状态变化。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "实现 setAuthority 与 updateField 元数据更新",
+            "description": "实现 setAuthority（MintTokens/FreezeAccount）与 updateField 元数据更新（Name/Symbol/Uri/AdditionalMetadata）。",
+            "dependencies": [
+              1
+            ],
+            "details": "封装 setAuthority(mint, newAuthority, authorityType) 支持 AuthorityType.MintTokens 与 AuthorityType.FreezeAccount：校验当前钱包持有原 authority 才能执行；newAuthority 为 SystemProgram.programId 表示永久放弃权限，属不可逆操作，执行前需显式 confirm 参数以防误操作。实现 updateField(mint, field, value) 支持 Name/Symbol/Uri/AdditionalMetadata（含额外 index），校验 metadata 指针与 mint authority，构造 TokenMetadataUpdateField 指令。",
+            "status": "pending",
+            "testStrategy": "单元测试：非法 authorityType 抛错；放弃 authority（设为 SystemProgram）无 confirm 参数时抛出风险错误；updateField 对非法 field 值（空 Uri、超长字符串）给出参数校验错误。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "单元测试与 devnet 完整流程集成测试",
+            "description": "编写完整单元测试与 devnet 可选集成测试，覆盖创建→更新费率→冻结/解冻→元数据更新→authority 转移全流程。",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "编写 Vitest 单元测试覆盖所有方法的参数校验与 authority 缺失错误信息（断言错误信息含建议内容）。添加可选标记的 devnet 集成测试完整流程：创建带 Transfer Fee 的 Token2022 mint（复用任务8工厂）→ 更新费率 → mint 到测试账户 → 冻结账户验证转账被拒 → 解冻 → 更新 Name/Symbol/Uri 元数据 → setAuthority 转移 mint authority，每步断言链上状态。通过环境变量（如 RUN_DEVNET_TESTS=1）控制执行，默认跳过以避免 CI 依赖网络与资金。",
+            "status": "pending",
+            "testStrategy": "pnpm test 全部单元测试通过且 devnet 测试默认跳过；设置 RUN_DEVNET_TESTS=1 后 devnet 完整流程端到端通过；tsc --noEmit 编译无误。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "将任务9拆分为：1) TokenManager 类骨架与 authority 校验机制；2) setTransferFee 与 freeze/thawAccount 实现；3) setAuthority（MintTokens/FreezeAccount）与 updateField 元数据更新；4) 单元测试 + devnet 完整流程集成测试。"
       },
       {
         "id": 10,
@@ -158,11 +598,75 @@
         "testStrategy": "单元测试：成员/阈值参数校验；devnet 可选集成测试复现验收标准3：2-of-3 多签完成 SPL 转账提案创建、两次审批、执行与余额验证",
         "priority": "medium",
         "dependencies": [
-          2,
-          4
+          "2",
+          "4"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "MultisigClient 骨架与 createMultisig",
+            "description": "在 packages/core 中新建 MultisigClient 类，封装 @sqds/multisig SDK，实现 createMultisig(members, threshold) 创建 M-of-N 多签。",
+            "dependencies": [],
+            "details": "在 packages/core/src/multisig 下建立 MultisigClient，构造函数注入 ClusterConnection（复用任务2的确认策略与 sendWithRetry、mainnet allowMainnet 风险控制）。createMultisig(members: PublicKey[], threshold: number) 调用 @sqds/multisig 的创建指令生成交易，返回 { multisigPda, vaultPda, signature }。提供 deriveMultisigPda(members, threshold) 纯函数（V4 程序地址三集群默认已部署），便于单元测试与 UI 预览。校验：members 非空、无重复、1 <= threshold <= members.length。",
+            "status": "pending",
+            "testStrategy": "Vitest 单元测试：参数校验（空成员、重复成员、threshold 越界）抛出明确错误；mock 交易发送验证指令组装正确；PDA 推导纯函数直接断言地址结果。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "成员管理与阈值修改",
+            "description": "实现 addMember/removeMember/setThreshold 三个成员与阈值变更操作，生成对应的多签 config 交易提案并投票执行。",
+            "dependencies": [
+              1
+            ],
+            "details": "在 MultisigClient 上实现 addMember(member)、removeMember(member)、setThreshold(newThreshold)，基于 V4 的 config_transaction 指令（add_member/remove_member/change_threshold）构造提案并按需审批执行。校验规则：threshold 必须满足 1 <= M <= N；removeMember 后剩余成员数不得小于当前阈值；setThreshold 不得大于当前成员数。操作前通过 RPC 读取当前 multisig config 作为权限与租金参数来源。",
+            "status": "pending",
+            "testStrategy": "单元测试：非法参数（threshold 越界、移除成员导致 M > N）抛错；mock SDK 指令验证生成的 config 交易内容包含正确的成员/阈值变更。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "提案流程：createTransferProposal → approve → execute",
+            "description": "实现 createTransferProposal(txMessage)、approveProposal、executeProposal，完成提案创建→审批→执行的完整流程。",
+            "dependencies": [
+              1
+            ],
+            "details": "1) createTransferProposal(txMessage)：接收复用任务5构造的 SOL/SPL/Token2022 转账指令集合，封装为 vault_transaction 并创建 Pending 提案；2) approveProposal(proposalPda, member)：成员投票，达到阈值后状态变为 Approved；3) executeProposal：以 vaultPda 为 fee payer 执行交易消息，返回 signature 供余额验证。执行前检查提案状态为 Approved，否则拒绝。",
+            "status": "pending",
+            "testStrategy": "单元测试：mock 指令构造验证 vault_transaction 消息组装与审批计数；验证未达阈值或状态非 Approved 时 executeProposal 拒绝执行。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "listProposals 提案状态查询",
+            "description": "实现 listProposals(status?) 按提案状态过滤查询，并提供 getProposal 单条查询与 getMultisigInfo 元信息查询。",
+            "dependencies": [
+              3
+            ],
+            "details": "基于 V4 的 getProposalsByMultisig 与 proposal 状态账户反序列化实现 listProposals(status?: ProposalStatus)，支持 Pending/Approved/Executed/Rejected/Cancelled 过滤，返回 { proposalPda, status, transactionPda, approvedBy[] }。getMultisigInfo(multisigPda) 返回当前成员列表与阈值，供 Web UI（任务13）展示。查询函数为只读 RPC 调用，不改链上状态。",
+            "status": "pending",
+            "testStrategy": "单元测试：mock 返回的账户数据验证状态过滤逻辑与反序列化字段映射正确。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "参数校验单元测试与 devnet 2-of-3 集成测试",
+            "description": "编写参数校验单元测试与 devnet 2-of-3 多签完整流程集成测试，对照验收标准3（SPL 转账提案创建、两次审批、执行与余额验证）。",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "单元测试：createMultisig 参数校验（空/重复成员、threshold>N）、成员与阈值操作边界、未达阈值不可执行等。集成测试（devnet，标记可选 skipIf 无网络）：a) airdrop 3个成员钱包；b) 创建 2-of-3 多签；c) 用任务5指令构造 SPL 转账创建提案；d) 两个成员依次 approve；e) execute 并断言 vault ATA 余额减少、接收方余额增加；f) 全程 listProposals 验证状态流转 Pending→Approved→Executed，逐项对照验收标准3。",
+            "status": "pending",
+            "testStrategy": "pnpm test 全绿：单元测试本地稳定通过；devnet 集成测试以 describe.skipIf 标记可选，复现验收标准3全流程并断言余额与状态变化。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 7,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "将任务10拆分为：1) MultisigClient 骨架与 createMultisig(members, threshold)；2) 成员管理与阈值修改（addMember/removeMember/setThreshold）；3) 提案流程：createTransferProposal（复用任务5指令构造）→ approve → execute；4) listProposals 状态查询；5) 参数校验单元测试；6) devnet 2-of-3 多签完整流程集成测试（对照验收标准3）。"
       },
       {
         "id": 11,
@@ -172,16 +676,93 @@
         "testStrategy": "Vitest：每个工具 schema 校验测试；用 MCP inspector 或 SDK client 内存连接做端到端调用测试；断言响应中不含密钥内容",
         "priority": "high",
         "dependencies": [
-          2,
-          3,
-          5,
-          6,
-          8,
-          9,
-          10
+          "2",
+          "3",
+          "5",
+          "6",
+          "8",
+          "9",
+          "10"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "搭建 MCP Server 骨架（McpServer + stdio 传输 + bin 入口）",
+            "description": "在 packages/mcp 中初始化 MCP Server 基础骨架：创建 McpServer 实例、接入 StdioServerTransport、配置 package.json bin 入口以支持 npx 直接运行。",
+            "dependencies": [],
+            "details": "新建 packages/mcp 包，依赖 @modelcontextprotocol/sdk；创建 src/server.ts 封装 McpServer 初始化（含 server name/version 元数据）与 stdio 传输连接逻辑；创建 src/cli.ts 作为 bin 入口，处理启动错误与优雅退出；package.json 声明 bin 字段与 shebang（#!/usr/bin/env node），确保 pnpm link 或 npx @solwallet/mcp 可运行；预留 registerTool 的工具注册目录结构（tools/ 目录按类别划分）。",
+            "status": "pending",
+            "testStrategy": "Vitest：用 SDK client 通过内存传输（InMemoryTransport 对）连接 server，断言 listTools 初始为空/可列出，server 可正常启动与关闭；验证 bin 入口 spawn 后不崩溃。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "注册钱包与状态类工具（createWallet/importWallet/getBalances/getClusterStatus/requestAirdrop）",
+            "description": "注册 5 个钱包与网络状态类 MCP 工具，每个工具带完整 zod inputSchema 与描述，调用 packages/core 对应功能。",
+            "dependencies": [
+              1
+            ],
+            "details": "使用 McpServer.registerTool 注册 createWallet（可选派生路径/强度参数）、importWallet（助记词或私钥导入）、getBalances（地址与可选 mint 过滤）、getClusterStatus（返回 slot/version/tps 健康信息）、requestAirdrop（限制 devnet/testnet，量与目标地址）；每个 inputSchema 字段用 zod 定义并附 .describe() 中文/英文描述，使 AI 零文档可调用；工具 handler 调用 @solwallet/core 的 ClusterConnection 与钱包模块，返回结构化 JSON 内容；错误统一映射为 MCP 错误响应（含 allowMainnet 风险错误提示）。",
+            "status": "pending",
+            "testStrategy": "Vitest：每个工具的 schema 校验测试（缺参数/非法参数返回明确错误）；mock core 层测试 handler 输出结构；SDK client 内存连接端到端调用 createWallet 与 getClusterStatus 断言返回字段。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "注册转账类工具（transfer/batchTransfer/mixedTransfer）",
+            "description": "注册 SOL/SPL 转账、批量转账与混合转账三类工具，复用 core 的指令构造与分片逻辑，inputSchema 覆盖收款人列表、金额、ATA 开关等参数。",
+            "dependencies": [
+              1
+            ],
+            "details": "registerTool 注册 transfer（from 钱包标识、to 地址、金额、可选 mint/SPL 与 createAta 开关）、batchTransfer（收款人数组 [{to, amount}]，复用 core 分片逻辑控制单笔交易大小）、mixedTransfer（SOL 与多种 SPL 代币混合的一次性转账）；金额参数支持人类可读单位并由 core 内部换算为 lamports/最小单位；schema 中 describe 风险提示（mainnet 需 allowMainnet）；返回交易签名与确认状态；失败时返回明确的 per-recipient 错误信息。",
+            "status": "pending",
+            "testStrategy": "Vitest：schema 校验测试（空收款人列表、负数金额、超长列表）；mock core 分片测试 batchTransfer 分片调用次数；devnet 可选集成测试验证 transfer 全流程。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "注册代币与多签类工具（createToken/manageToken2022/multisig 系列）",
+            "description": "注册代币发行、Token-2022 扩展管理与 @sqds/multisig 多签系列工具，覆盖发币、铸/烧、权限转移与 2-of-3 多签流程。",
+            "dependencies": [
+              1
+            ],
+            "details": "registerTool 注册 createToken（decimals、初始供应量、铸币权限、可选 metadata）、manageToken2022（子命令式参数：transferFee/interest-bearing/metadata pointer 等扩展配置）、multisig 系列：createMultisig（成员公钥+阈值）、proposeTransaction（构造待签交易）、approveTransaction（成员签名）、executeTransaction（达阈值后执行），基于 @solwallet/core 封装的 @sqds/multisig 逻辑；schema 字段逐一 describe（如 threshold 含 2-of-3 示例说明）；返回 vault/ata/签名等关键地址与交易签名。",
+            "status": "pending",
+            "testStrategy": "Vitest：schema 校验测试（threshold 超过成员数报错、decimals 越界）；mock core 测试 multisig propose→approve→execute 状态流转；devnet 可选集成测试发币与多签流程。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "集成统一输出脱敏器（密钥默认脱敏）",
+            "description": "将任务3实现的统一脱敏器接入所有 MCP 工具的输出路径，确保响应中绝不出现助记词、私钥等敏感内容。",
+            "dependencies": [
+              2
+            ],
+            "details": "在工具 handler 返回值统一经过 sanitize 输出管道（复用 @solwallet/core 任务3 的脱敏器）：识别并掩码助记词、私钥、seed、 Keypair 序列化字段；即使调用方传入敏感输入（如 importWallet 的助记词），响应中仅返回脱敏后的公钥/确认信息；对错误消息同样过脱敏器（防止错误堆栈带出密钥）；提供显式 opt-in 逃生口（如 exportPrivateKey 需 dangerouslyAllowExport 参数且默认拒绝）。",
+            "status": "pending",
+            "testStrategy": "Vitest：密钥泄露断言测试——调用 createWallet/importWallet/transfer 等全部工具后，JSON.stringify 整个 MCP 响应，用正则匹配助记词词组、base58 私钥模式，断言无匹配；错误路径同样断言。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 6,
+            "title": "端到端测试：schema 校验 + SDK client 内存连接 + 密钥泄露断言",
+            "description": "补齐 MCP 包整体测试：用 MCP SDK client 经内存传输对全部已注册工具做端到端调用测试，并汇总密钥泄露安全断言。",
+            "dependencies": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "details": "编写集成测试套件：用 @modelcontextprotocol/sdk 的 Client + InMemoryTransport 对连接 server；遍历工具清单断言 listTools 返回全部预期工具且每个 inputSchema 均含描述；对每个工具执行非法输入用例（校验 zod 错误响应格式）；端到端调用只读工具（getClusterStatus、getBalances，mock RPC）；最终安全汇总测试：对一次会话内全部工具的全部响应做密钥泄露断言（复用任务5子项的正则与字段检查）；确保 pnpm test 全绿且 tsc --noEmit 无误。",
+            "status": "pending",
+            "testStrategy": "Vitest 集成测试：InMemoryTransport 端到端覆盖全部 10+ 工具；快照对比 listTools 输出；全局密钥泄露扫描断言；CI 中 tsc --noEmit 与 pnpm test 必须通过。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 6,
+        "recommendedSubtasks": 6,
+        "expansionPrompt": "将任务11拆分为：1) MCP Server 骨架（McpServer + stdio 传输 + bin 入口支持 npx）；2) 钱包与状态类工具注册（createWallet/importWallet/getBalances/getClusterStatus/requestAirdrop）含 inputSchema；3) 转账类工具（transfer/batchTransfer/mixedTransfer）；4) 代币与多签类工具（createToken/manageToken2022/multisig 系列）；5) 统一输出脱敏器集成；6) schema 校验测试 + SDK client 内存端到端测试 + 密钥泄露断言。"
       },
       {
         "id": 12,
@@ -191,10 +772,47 @@
         "testStrategy": "人工验收：按 README 在 Claude Code 中粘贴 .mcp.json 配置，用自然语言完成验收标准1全流程（生成钱包→airdrop→创建带 Transfer Fee 的 Token2022→批量转账→查余额）；文档链接与命令可执行性检查",
         "priority": "medium",
         "dependencies": [
-          11
+          "11"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "编写 SKILL.md：按工具分类的典型任务序列与参数约定",
+            "description": "编写 skills/solana-wallet/SKILL.md，按 MCP 工具分类描述典型任务序列与参数约定，对齐验收标准1流程。",
+            "dependencies": [],
+            "details": "在 skills/solana-wallet/SKILL.md 中按 MCP 工具分类（钱包管理、网络连接、Token/Token2022、批量转账、多签）组织典型任务序列，对齐验收标准1流程（生成钱包→airdrop→创建带 Transfer Fee 的 Token2022→批量转账→查余额）。明确各工具参数约定：集群参数（devnet/testnet/mainnet-beta/自定义 RPC URL）、commitment/确认策略、allowMainnet 仅 mainnet 需显式 true、金额单位与精度换算约定、输出脱敏原则（只输出地址，永不输出密钥与助记词）。为每个典型任务写出自然语言→工具调用序列示例。",
+            "status": "pending",
+            "testStrategy": "人工评审 SKILL.md：工具清单与 packages/mcp 实际暴露的 MCP 工具一一对应；按验收标准1流程逐步核对每步的工具调用示例参数正确、命令可执行。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "编写 README 五分钟上手指南与 RPC/mcp 配置片段",
+            "description": "编写根 README.md 五分钟上手指南：clone → install → 配置 RPC → 让 AI 接管，含 npx 启动、三种集群 RPC 示例（Helius/QuickNode）、allowMainnet 风险提示与 claude mcp add/.mcp.json 配置片段。",
+            "dependencies": [],
+            "details": "在根 README.md 编写 5 分钟上手指南：clone → pnpm install → 配置 RPC → 让 AI 接管。包含：npx 启动 mcp 包说明；三种集群 RPC 配置示例（devnet/testnet 官方端点 + Helius/QuickNode 自定义 URL 示例）；claude mcp add 命令片段与 .mcp.json 完整配置片段；mainnet-beta 使用 allowMainnet: true 的风险提示区块；快速体验段落引导用户用自然语言完成验收标准1全流程。",
+            "status": "pending",
+            "testStrategy": "人工验收：按 README 从零执行 clone→install→配置→在 Claude Code 中粘贴 .mcp.json 配置，验证每个命令片段可直接复制执行且 MCP 连接成功。",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "npm 发布配置（core 与 mcp 包）与端到端人工验收",
+            "description": "为 @solwallet/core 与 @solwallet/mcp 配置 npm 发布（package.json 字段、files 白名单、npx 入口、npm pack 校验），并按验收标准1完成人工端到端验收。",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "为 @solwallet/core 与 @solwallet/mcp 包添加 npm 发布配置：package.json 设置 name/files/main/types/engines（Node ≥20）/repository 等字段与 files 白名单（dist 产物）；pnpm build 产出后 npm pack --dry-run 核对包内容无多余文件；确认 mcp 包 bin/npx 启动入口可用。随后按验收标准1做人工端到端验收：在 Claude Code 中粘贴 .mcp.json 配置，用自然语言完成生成钱包→devnet airdrop→创建带 Transfer Fee 的 Token2022→批量转账→查余额全流程，并核对 README 与 SKILL.md 文档链接与命令可执行性。",
+            "status": "pending",
+            "testStrategy": "npm pack --dry-run 输出符合预期文件清单；人工执行验收标准1全流程清单逐项打勾，所有文档命令复制可执行。",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 4,
+        "recommendedSubtasks": 3,
+        "expansionPrompt": "将任务12拆分为：1) 编写 SKILL.md（按工具分类的典型任务序列与参数约定）；2) 编写 README（5分钟上手、RPC 配置示例、allowMainnet 风险提示、claude mcp add/.mcp.json 片段）；3) npm 发布配置（@solwallet/core 与 mcp 包）；4) 按验收标准1做人工端到端验收。"
       },
       {
         "id": 13,
@@ -204,16 +822,105 @@
         "testStrategy": "Vitest + Testing Library：各模块表单校验与二次确认流程测试；用 devnet 手动验收验收标准2全流程；Lighthouse/视觉检查深色主题",
         "priority": "medium",
         "dependencies": [
-          2,
-          3,
-          5,
-          6,
-          8,
-          9,
-          10
+          "2",
+          "3",
+          "5",
+          "6",
+          "8",
+          "9",
+          "10"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "搭建 Vite + React + Tailwind 应用骨架与深色主题设计系统",
+            "description": "在 apps/web 下初始化 Vite + React + TS 项目，配置 Tailwind 与深色主题设计系统及基础组件。",
+            "dependencies": [],
+            "details": "在 apps/web 下初始化 Vite React TS 项目，配置 Tailwind 与 PostCSS，扩展 tsconfig 继承根 tsconfig.base.json（strict, target ES2022）；通过 workspace 依赖引入 @solwallet/core；建立目录约定（components/、modules/、hooks/、lib/）；深色主题技术感设计系统：定义颜色 token（背景、面板、主色、成功/危险色）、字体（等宽字体用于地址与金额）、圆角与阴影规范、基础 UI 组件（Button、Card、Input、Modal、Badge、Toast）；封装全局 Toast/确认 Modal 提供者。",
+            "status": "pending",
+            "testStrategy": "pnpm install 与 vite dev 启动成功；tsc --noEmit 通过；渲染 App 冒烟测试确认深色主题类生效",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "实现布局（左侧网络与钱包、右侧功能区）与路由结构",
+            "description": "实现左侧网络与钱包侧边栏、右侧功能区的 Shell 布局，React Router 路由结构与全局网络/钱包状态 Context。",
+            "dependencies": [
+              1
+            ],
+            "details": "使用 React Router 定义主路由：/dashboard、/wallet、/transfer、/token、/multisig；实现 Shell 布局组件：左侧边栏含网络选择器（devnet/testnet/mainnet-beta + 自定义 RPC URL）与当前钱包摘要（地址缩略、SOL 余额、切换钱包入口），右侧为 <Outlet/> 功能区；引入全局 AppState Context（React Context + useReducer 或轻量 zustand）管理 connection、cluster、wallet、balances；连接配置持久化到 localStorage；顶层 ErrorBoundary 捕获 RPC 异常。",
+            "status": "pending",
+            "testStrategy": "Testing Library 断言各路由渲染对应模块占位、侧边栏网络切换更新 Context 并持久化",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "实现 Dashboard 模块（网络状态 + 余额展示）",
+            "description": "Dashboard 页面：展示当前 cluster 网络状态（端点、slot、epoch）与钱包 SOL/SPL/Token2022 余额列表。",
+            "dependencies": [
+              2
+            ],
+            "details": "Dashboard 页面：使用 useConnection 建立与当前 cluster 的 RPC 连接；展示网络状态（端点、版本 getVersion、slot 进度 getEpochInfo、延迟探测）；展示当前钱包 SOL 余额（getBalance，带 lamports→SOL 换算，复用 core 的金额换算函数）与 SPL/Token2022 代币账户余额列表（getTokenAccountsByOwner 覆盖两个 program，展示 mint、余额、精度）；余额定时轮询（可暂停）与手动刷新按钮；加载骨架屏与 RPC 失败重试 UI。",
+            "status": "pending",
+            "testStrategy": "mock @solana/web3.js Connection，断言余额与网络信息正确渲染、错误态显示重试；换算精度单元测试复用 core 测试",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "实现钱包模块（生成/导入/余额/管理）",
+            "description": "钱包页面：生成钱包、JSON 密钥/助记词导入、钱包列表管理与导出，全程脱敏与二次确认。",
+            "dependencies": [
+              2
+            ],
+            "details": "钱包页面三功能：1) 生成：调用 core 生成 Keypair，展示地址与新助记词（强提示仅显示一次、需勾选已备份确认）；2) 导入：支持 JSON 密钥文件（[byte array] 数组）与 BIP39 助记词（可配置派生路径 m/44'/501'/0'/0'），导入前二次确认并提示密钥风险；3) 管理：本机钱包列表存 localStorage（可选 AES-GCM 加密口令保护），支持切换、删除（删除需输入确认文案）、复制地址、导出（explicit confirm 流程 + 风险提示）；所有展示严格遵守脱敏原则：只显示地址与缩略，密钥/助记词仅在用户主动触发且二次确认后显示。",
+            "status": "pending",
+            "testStrategy": "Testing Library 测试导入表单校验（无效 JSON/助记词报错）、生成流程备份勾选拦截、删除确认流程；断言 UI 默认渲染不含任何密钥字节",
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "实现转账模块（单笔/批量/混合表单 + 二次确认流程）",
+            "description": "转账页面：单笔/批量/混合转账表单，复用 core 指令构造与分片，二次确认后浏览器签名发送并记录历史。",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "转账页面：表单支持单笔、批量（多接收方列表：地址+金额，支持粘贴多行解析）与混合模式（不同 mint 的 SOL/SPL/Token2022 混合转账）；复用 core 的指令构造与批量分片逻辑，浏览器端用 useConnection + wallet signer 签名发送（sendRawTransaction，支持 preflight 校验与 commitment 确认）；金额输入使用 core 换算函数校验精度与余额充足性；发送前弹出二次确认 Modal，逐项列出接收方、金额、预估手续费与风险提示（不可撤销、地址需自行核对）；发送后展示 signature、确认状态，并写入交易历史。",
+            "status": "pending",
+            "testStrategy": "Testing Library：批量列表增删行与粘贴解析、余额不足校验报错、二次确认 Modal 必须确认后才调用 sendRawTransaction（mock）；分片批量提交顺序与失败中断逻辑测试",
+            "parentId": "undefined"
+          },
+          {
+            "id": 6,
+            "title": "实现代币发行与 Token2022 管理模块",
+            "description": "代币页面：SPL/Token2022 发行表单（含 Transfer Fee 扩展）与已发代币管理（增发、ATA 创建）。",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "代币页面：1) 发行：表单（名称/符号/精度/铸造数量/是否启用 Transfer Fee 扩展、费率与最大费率），复用 core 的 mint 创建与 Token2022 扩展指令构造，浏览器签名发送；发币前二次确认并展示费用与不可逆提示；2) 管理：展示当前钱包持有的 SPL/Token2022 资产列表（mint、精度、余额、扩展属性），支持铸造增发、创建 ATA（开关逻辑复用 core）、转移代币入口跳转转账模块；操作均带确认流程。",
+            "status": "pending",
+            "testStrategy": "mock Connection + 交易签名流程，断言表单校验（精度范围、费率上限）、发币二次确认拦截、Token2022 扩展参数正确传入 core 指令构造函数（spy 断言参数）",
+            "parentId": "undefined"
+          },
+          {
+            "id": 7,
+            "title": "实现多签模块界面",
+            "description": "多签界面：基于 @sqds/multisig 的创建多签、提案查看、签名与执行流程 UI。",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "多签页面：基于 @sqds/multisig（浏览器端调用其指令构造，或复用 core 封装）：1) 创建多签：选择成员公钥列表（校验格式）与阈值 m-of-n，二次确认后发送创建交易；2) 展示多签详情：成员、阈值、vault 地址、待执行提案列表；3) 提案流程：创建交易提案（复用转账/发币的指令构造输出 TransactionMessage）、成员签名 approve、达到阈值后执行；4) 签名状态徽标（已签/待签）与成员操作入口。",
+            "status": "pending",
+            "testStrategy": "Testing Library：成员地址校验、阈值约束（1<=m<=n）、创建与提案二次确认流程；mock vault/提案 RPC 数据渲染详情与签名状态",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 8,
+        "recommendedSubtasks": 7,
+        "expansionPrompt": "将任务13拆分为：1) Vite + React + Tailwind 应用骨架与深色主题设计系统；2) 布局（左侧网络与钱包、右侧功能区）与路由/tab 结构；3) Dashboard 模块（网络状态 + 余额展示）；4) 钱包模块（生成/导入/余额）；5) 转账模块（单笔/批量/混合表单 + 二次确认流程）；6) 代币发行与 Token2022 管理模块；7) 多签模块界面；8) localStorage 交易历史与动态 Explorer 链接；9) Testing Library 测试与 devnet 手动验收。"
       },
       {
         "id": 14,
@@ -223,19 +930,74 @@
         "testStrategy": "pnpm test 输出全绿；覆盖率报告确认钱包/金额/分片模块高覆盖；执行验收标准1-4清单逐项打勾",
         "priority": "high",
         "dependencies": [
-          3,
-          4,
-          5,
-          6,
-          13
+          "3",
+          "4",
+          "5",
+          "6",
+          "13"
         ],
         "status": "pending",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "补齐钱包边界测试（无效助记词、错误密码）",
+            "description": "为钱包模块补充无效助记词、错误密码等边界情况的单元测试",
+            "dependencies": [],
+            "details": "在 packages/core 的钱包模块测试中补充边界用例：传入无效助记词（格式错误、词数不足、含非法单词）应抛出明确错误；使用错误密码派生/解密应失败；Keystore 加解密往返一致性；空密码或超长密码的行为定义。确保所有边界情况均有明确断言而非静默通过。",
+            "status": "pending",
+            "testStrategy": "运行 pnpm test 中钱包相关测试文件，确认新增边界用例全部通过且失败路径均有断言",
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "补齐金额精度与分片算法边界测试",
+            "description": "为金额换算（SOL/lamports、token decimals）与批量转账分片算法补充边界测试",
+            "dependencies": [],
+            "details": "覆盖金额换算精度：小数位超出 decimals、极大/极小金额、浮点精度陷阱（如 0.1+0.2）、零与负金额拒绝；分片算法：空列表、单条、恰好整除、不能整除余数、分片大小为 0 或负数、超过单笔交易指令上限的拆分策略。断言分片结果重组后等于原集合且无丢失/重复。",
+            "status": "pending",
+            "testStrategy": "运行金额与分片相关单元测试，用属性式断言（分片重组还原原集合）验证正确性",
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "补齐 ATA 开关转账测试与 CI scripts（test/build/dev）",
+            "description": "补充 ATA 开关相关转账测试，并在根 package.json 配置 test/build/dev 脚本",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "测试转账目标 ATA 不存在时的创建开关行为：开启时构造 create ATA 指令、关闭时抛出明确错误或跳过；ATA 已存在时不重复创建。同时在根 package.json 增加 scripts：test（vitest run）、build（各包 tsc 构建）、dev（启动 apps/web dev server），确保 pnpm test / pnpm build / pnpm dev 可直接执行。",
+            "status": "pending",
+            "testStrategy": "mock 或 devnet 验证 ATA 开关两种分支；pnpm test、pnpm build、pnpm dev 三条命令逐一执行确认成功",
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "生成覆盖率报告并核对 MVP 验收标准1-4清单",
+            "description": "生成测试覆盖率报告，确认核心模块高覆盖，并逐项核对 MVP 验收标准1-4",
+            "dependencies": [
+              3
+            ],
+            "details": "配置 Vitest coverage（--coverage）生成报告，确认钱包/金额换算/分片模块达到高覆盖并记录缺口。对照 MVP 验收标准逐项核对：标准1（自然语言完成生成钱包→airdrop→Token2022→批量转账→查余额）、标准2（Web UI 全流程）、标准3（MCP 工具与集群切换）、标准4（多签 2-of-3 流程），输出逐项打勾清单，未达标项记录为遗留问题。",
+            "status": "pending",
+            "testStrategy": "pnpm test --coverage 全绿且报告达标；按验收标准1-4清单在 devnet 上手动/脚本化逐项验证并记录结果",
+            "parentId": "undefined"
+          }
+        ],
+        "complexity": 5,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "将任务14拆分为：1) 排查并补齐钱包边界测试（无效助记词、错误密码）；2) 补齐金额精度与分片算法边界测试；3) 补齐 ATA 开关等转账测试缺口与 CI scripts（test/build/dev）；4) 生成覆盖率报告并核对 MVP 验收标准1-4逐项清单。"
       }
     ],
     "metadata": {
-      "created": "2026-11-06T08:38:37.274Z",
-      "updated": "2026-11-06T08:38:37.274Z",
+      "version": "1.0.0",
+      "lastModified": "2026-11-06T09:12:03.705Z",
+      "taskCount": 14,
+      "completedCount": 1,
+      "tags": [
+        "master"
+      ],
+      "created": "2026-11-06T09:12:05.075Z",
       "description": "Tasks for master context"
     }
   }

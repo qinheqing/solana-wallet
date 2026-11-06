@@ -9,6 +9,17 @@ dev-debug.log
 # Dependency directories
 node_modules/
 
+# Build output
+dist/
+coverage/
+
+# Solana / Rust (cpi-program)
+target/
+.anchor/
+test-ledger/
+.so
+.keypair
+
 # Environment variables
 .env
 
