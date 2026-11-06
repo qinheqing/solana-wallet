@@ -1,0 +1,125 @@
+{
+	"meta": {
+		"generatedAt": "2026-11-06T08:39:48.635Z",
+		"tasksAnalyzed": 14,
+		"totalTasks": 14,
+		"analysisCount": 14,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": false
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "搭建 monorepo 基础工程结构",
+			"complexityScore": 4,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "将任务1拆分为子任务：1) 初始化 pnpm workspace 与目录结构（packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet）；2) 配置根 tsconfig（strict、ES2022）与共享 lint 配置；3) 安装 Solana/MCP 相关依赖并初始化 Vitest 测试基础设施；4) 验证 pnpm install/test/tsc 基线通过。",
+			"reasoning": "工程脚手架搭建涉及 pnpm workspace、多包目录、TS 配置、Vitest 与依赖安装，步骤较多但模式成熟、无复杂业务逻辑，风险低。"
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "实现网络连接与集群管理（F2）",
+			"complexityScore": 5,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "将任务2拆分为：1) 设计 ClusterConnection 类与 createConnection 工厂及集群类型定义；2) 实现健康检查（slot/版本/TPS）与 airdrop（限 devnet/testnet）；3) 实现可配置确认策略 sendWithRetry（commitment/timeout/retries）；4) 实现 mainnet-beta allowMainnet 安全开关；5) 编写单元与可选 devnet 集成测试。",
+			"reasoning": "RPC 封装与确认策略有一定技术细节（重试、超时、安全开关），但均为 web3.js 标准用法，复杂度中等。"
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "实现钱包管理模块（F3）",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "将任务3拆分为：1) Keypair 生成与 solana-keygen 兼容 JSON 密钥导入/导出；2) BIP39 助记词导入与 BIP44 派生路径（bip39 + ed25519-hd-key）；3) AES-256-GCM 加密存储与显式 confirm 导出机制；4) SOL/SPL/Token2022 余额查询（getBalance + getTokenAccountsByOwner 双 program）；5) 输出脱敏器设计与全模块安全断言测试。",
+			"reasoning": "涉及加密存储、助记词派生、多 program 余额查询与安全脱敏要求，安全敏感度高、模块多，需要严格的测试保证。"
+		},
+		{
+			"taskId": 4,
+			"taskTitle": "实现金额换算与错误解析工具",
+			"complexityScore": 3,
+			"recommendedSubtasks": 2,
+			"expansionPrompt": "将任务4拆分为：1) bigint 金额换算 formatAmount/parseAmount 与精度测试；2) 错误解析器（解析 SendTransactionError 程序错误码并生成建议）。",
+			"reasoning": "纯工具函数，逻辑清晰、边界少（bigint 精度换算较直观），测试简单。"
+		},
+		{
+			"taskId": 5,
+			"taskTitle": "实现单笔转账核心逻辑（F4.1/F4.5/F4.6）",
+			"complexityScore": 6,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "将任务5拆分为：1) getMintProgram：通过 account owner 识别 System/Token/Token2022；2) buildTransferInstruction 三种程序指令分派；3) ATA 自动创建（idempotent 指令 + allowAtaCreation 开关）；4) dry-run simulateTransaction 实现（收集 logs/units）；5) TransferResult 回执组装与错误解析集成；6) 单元测试与可选 devnet 转账集成测试。",
+			"reasoning": "多程序指令分派、ATA 处理、dry-run 模拟与回执组装，涉及多条链路与安全性开关，复杂度中高。"
+		},
+		{
+			"taskId": 6,
+			"taskTitle": "实现批量转账与混合转账（F4.2/F4.3）",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "将任务6拆分为：1) estimateTransactionSize 交易字节估算（序列化模拟）；2) 批量分片算法（指令数 + 1232 字节双约束切分）；3) executeBatchTransfer 串行发送与逐笔结果聚合；4) executeMixedTransfer 多 mint（SOL+SPL+Token2022）单交易指令合并；5) 分片边界测试（N=1000、字节上限触发）与 mock RPC 发送测试。",
+			"reasoning": "交易大小估算与双约束分片算法是本项目技术难点之一，混合转账指令合并也有边界情况，需要精细的单元测试。"
+		},
+		{
+			"taskId": 7,
+			"taskTitle": "实现示例 CPI 程序与部署支持（F4.4）",
+			"complexityScore": 6,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "将任务7拆分为：1) Anchor 项目初始化与程序结构设计（recipients/amounts 指令）；2) 实现 CPI 循环 token::transfer 逻辑；3) build/deploy 脚本（localnet/testnet，限 dev/test）；4) core 侧 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数；5) anchor test 本地 validator 测试与集成验证。",
+			"reasoning": "Anchor/Rust 程序开发引入独立技术栈（Rust、anchor build/test、本地 validator），环境搭建与调试成本较高，但程序逻辑本身较简单。"
+		},
+		{
+			"taskId": 8,
+			"taskTitle": "实现代币发行（F5.1/F5.2/F5.4）",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "将任务8拆分为：1) SPL createMint2/initializeMint 基础封装（decimals/authorities）；2) Token2022 扩展参数结构化定义与校验（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）；3) Token2022 扩展初始化指令组装（各 createInitialize*Instruction）；4) Token Metadata 三指令流程集成；5) mintTo/burn 统一接口；6) 单元测试 + devnet 可选集成测试。",
+			"reasoning": "Token2022 扩展种类多、指令组装复杂，Token Metadata 三指令流程繁琐，参数校验边界多，是核心功能中较重的模块。"
+		},
+		{
+			"taskId": 9,
+			"taskTitle": "实现 Token2022 插件运行时管理（F5.3）",
+			"complexityScore": 5,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "将任务9拆分为：1) TokenManager 类骨架与 authority 校验机制；2) setTransferFee 与 freeze/thawAccount 实现；3) setAuthority（MintTokens/FreezeAccount）与 updateField 元数据更新；4) 单元测试 + devnet 完整流程集成测试。",
+			"reasoning": "依赖任务8已建立的 Token2022 基础，主要是指令封装与 authority 校验，模式重复性高，复杂度中等。"
+		},
+		{
+			"taskId": 10,
+			"taskTitle": "实现 Squads V4 多签模块（F6）",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "将任务10拆分为：1) MultisigClient 骨架与 createMultisig(members, threshold)；2) 成员管理与阈值修改（addMember/removeMember/setThreshold）；3) 提案流程：createTransferProposal（复用任务5指令构造）→ approve → execute；4) listProposals 状态查询；5) 参数校验单元测试；6) devnet 2-of-3 多签完整流程集成测试（对照验收标准3）。",
+			"reasoning": "Squads V4 SDK 学习曲线较陡，提案生命周期（创建/审批/执行/Vault 交易消息）状态管理复杂，集成测试流程长。"
+		},
+		{
+			"taskId": 11,
+			"taskTitle": "实现 MCP Server（F1.1）",
+			"complexityScore": 6,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "将任务11拆分为：1) MCP Server 骨架（McpServer + stdio 传输 + bin 入口支持 npx）；2) 钱包与状态类工具注册（createWallet/importWallet/getBalances/getClusterStatus/requestAirdrop）含 inputSchema；3) 转账类工具（transfer/batchTransfer/mixedTransfer）；4) 代币与多签类工具（createToken/manageToken2022/multisig 系列）；5) 统一输出脱敏器集成；6) schema 校验测试 + SDK client 内存端到端测试 + 密钥泄露断言。",
+			"reasoning": "工具数量多（10+），每个需 schema 定义与描述；机制本身由 SDK 提供，但覆盖面广、需端到端验证与脱敏安全测试。"
+		},
+		{
+			"taskId": 12,
+			"taskTitle": "编写 Claude Skill 与 README 上手指南（F1.2/F1.4）",
+			"complexityScore": 4,
+			"recommendedSubtasks": 3,
+			"expansionPrompt": "将任务12拆分为：1) 编写 SKILL.md（按工具分类的典型任务序列与参数约定）；2) 编写 README（5分钟上手、RPC 配置示例、allowMainnet 风险提示、claude mcp add/.mcp.json 片段）；3) npm 发布配置（@solwallet/core 与 mcp 包）；4) 按验收标准1做人工端到端验收。",
+			"reasoning": "以文档编写为主，无代码复杂度，但需要准确性（命令可执行、配置正确）与人工验收流程。"
+		},
+		{
+			"taskId": 13,
+			"taskTitle": "实现 Web UI（F7）",
+			"complexityScore": 8,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "将任务13拆分为：1) Vite + React + Tailwind 应用骨架与深色主题设计系统；2) 布局（左侧网络与钱包、右侧功能区）与路由/tab 结构；3) Dashboard 模块（网络状态 + 余额展示）；4) 钱包模块（生成/导入/余额）；5) 转账模块（单笔/批量/混合表单 + 二次确认流程）；6) 代币发行与 Token2022 管理模块；7) 多签模块界面；8) localStorage 交易历史与动态 Explorer 链接；9) Testing Library 测试与 devnet 手动验收。",
+			"reasoning": "覆盖 5 个功能模块的完整前端开发，含状态管理、表单校验、二次确认交互、localStorage、视觉设计与测试，是工作量最大的任务之一。"
+		},
+		{
+			"taskId": 14,
+			"taskTitle": "端到端验收测试与测试补齐",
+			"complexityScore": 5,
+			"recommendedSubtasks": 4,
+			"expansionPrompt": "将任务14拆分为：1) 排查并补齐钱包边界测试（无效助记词、错误密码）；2) 补齐金额精度与分片算法边界测试；3) 补齐 ATA 开关等转账测试缺口与 CI scripts（test/build/dev）；4) 生成覆盖率报告并核对 MVP 验收标准1-4逐项清单。",
+			"reasoning": "以测试补齐与验收核对为主，逻辑不复杂但依赖多个上游模块完成，需系统性核对，流程性工作量大。"
+		}
+	]
+}
