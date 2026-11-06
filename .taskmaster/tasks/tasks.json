@@ -205,14 +205,14 @@
         "dependencies": [
           "3"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "实现 bigint 金额换算 formatAmount/parseAmount 与精度测试",
             "description": "在 packages/core 中使用 bigint 实现 formatAmount/parseAmount，完成最小单位与展示金额的互换并覆盖精度边界",
             "dependencies": [],
-            "details": "在 packages/core 新建 src/utils/amount.ts，使用 bigint 实现换算。formatAmount(rawAmount: bigint, decimals: number): string 将最小单位格式化为显示字符串；parseAmount(displayAmount: string, decimals: number): bigint 解析十进制字符串为最小单位，非法输入（多小数点、负数、超精度小数位）抛出明确错误。核心逻辑仅用字符串拆分与 bigint 乘除，禁止使用 number/float 参与换算以避免精度丢失。覆盖 lamports↔SOL（decimals=9）与 SPL token（任意 decimals）场景，含 0、极大值（如 10^18 最小单位）、小数点前后补零等边界。",
+            "details": "在 packages/core 新建 src/utils/amount.ts，使用 bigint 实现换算。formatAmount(rawAmount: bigint, decimals: number): string 将最小单位格式化为显示字符串；parseAmount(displayAmount: string, decimals: number): bigint 解析十进制字符串为最小单位，非法输入（多小数点、负数、超精度小数位）抛出明确错误。核心逻辑仅用字符串拆分与 bigint 乘除，禁止使用 number/float 参与换算以避免精度丢失。覆盖 lamports↔SOL（decimals=9）与 SPL token（任意 decimals）场景，含 0、极大值（如 10^18 最小单位）、小数点前后补零等边界。\n<info added on 2026-11-06T09:51:39.778Z>\n完成记录：formatAmount/parseAmount 已全部实现为 bigint 与纯字符串运算，全程零浮点参与。parseAmount 额外支持省略整数部分的 .5 形式；当小数位数超过 decimals 时抛出 AMOUNT_TOO_PRECISE 明确错误以避免静默舍入；同时拒绝负号、科学计数法（如 1e9）与千分位逗号等非法格式并给出明确提示。新增 lamportsToSol/solToLamports 便捷封装（基于 decimals=9 的 format/parse 实现）。测试新增 2^80 巨值的 format→parse 往返一致用例，以及任意值 format↔parse 往返不变性断言（parse(format(x)) === x、format(parse(s)) === s）。\n</info added on 2026-11-06T09:51:39.778Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：lamports↔SOL 与 token units↔显示金额往返测试（format(parse(x))===x）；大数精度测试（超过 Number.MAX_SAFE_INTEGER 的值）；非法输入抛错断言。",
             "parentId": "undefined"
@@ -224,7 +224,7 @@
             "dependencies": [
               1
             ],
-            "details": "在 packages/core 新建 src/utils/errors.ts，定义 ParsedProgramError 类型 {code: number|string, message: string, suggestion: string}。实现 parseTransactionError(error: unknown): ParsedProgramError：捕获 @solana/web3.js 的 SendTransactionError，解析 InstructionError 中的程序错误码，映射常见错误（InsufficientFundsForFee、AccountNotFound、InvalidAccountOwner 等）为可读 message 并附建议动作（如增加 SOL 支付手续费、检查账户/ATA 是否存在）。未知错误码回退为通用消息并保留原始信息；非 SendTransactionError 输入包装为未知错误。提供错误码映射表常量便于扩展。",
+            "details": "在 packages/core 新建 src/utils/errors.ts，定义 ParsedProgramError 类型 {code: number|string, message: string, suggestion: string}。实现 parseTransactionError(error: unknown): ParsedProgramError：捕获 @solana/web3.js 的 SendTransactionError，解析 InstructionError 中的程序错误码，映射常见错误（InsufficientFundsForFee、AccountNotFound、InvalidAccountOwner 等）为可读 message 并附建议动作（如增加 SOL 支付手续费、检查账户/ATA 是否存在）。未知错误码回退为通用消息并保留原始信息；非 SendTransactionError 输入包装为未知错误。提供错误码映射表常量便于扩展。\n<info added on 2026-11-06T09:51:52.904Z>\nparseTransactionError 必须保证永不抛出异常：任何未识别或无法解析的错误统一回退为 code 为 UNKNOWN 的通用解析结果，suggestion 附带前往 Explorer 查看交易详情排查的建议。错误规则表需覆盖以下场景：insufficient funds（含程序错误码 0x1）、未注资账户执行 debit 扣款、blockhash 过期（suggestion 明确建议重新签名并发送新交易，而非直接重发原签名交易）、AccountNotFound（账户不存在）、owner mismatch（InvalidAccountOwner 账户所有者不匹配）、simulation failed（交易模拟失败）、RPC 限流 429 与 JSON-RPC 错误 -32005。解析逻辑需读取 SendTransactionError.logs 与 transactionError.message 提取原始错误信息用于匹配。每条规则的 suggestion 必须包含具体可执行的补救动作（如增加 SOL 支付手续费、先注资/创建 ATA、等待限流恢复后重试等），输出结构面向 MCP/AI 消费，支持上游自动纠错与重试决策。\n</info added on 2026-11-06T09:51:52.904Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：mock SendTransactionError（含 InstructionError 与日志）验证各已知错误码返回正确的 {code, message, suggestion}；未知错误码与普通 Error 输入的回退行为测试。",
             "parentId": "undefined"
@@ -232,7 +232,8 @@
         ],
         "complexity": 3,
         "recommendedSubtasks": 2,
-        "expansionPrompt": "将任务4拆分为：1) bigint 金额换算 formatAmount/parseAmount 与精度测试；2) 错误解析器（解析 SendTransactionError 程序错误码并生成建议）。"
+        "expansionPrompt": "将任务4拆分为：1) bigint 金额换算 formatAmount/parseAmount 与精度测试；2) 错误解析器（解析 SendTransactionError 程序错误码并生成建议）。",
+        "updatedAt": "2026-11-06T09:51:55.005Z"
       },
       {
         "id": "5",
@@ -245,14 +246,14 @@
           "2",
           "4"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "实现 getMintProgram：通过 account owner 识别 System/Token/Token2022",
             "description": "通过查询 mint 账户的 owner 程序，自动识别该 mint 属于 System Program、SPL Token 还是 Token2022。",
             "dependencies": [],
-            "details": "实现 getMintProgram(mint)：调用 getAccountInfo 获取该 mint 账户的 owner 字段，与 SystemProgram.programId、TOKEN_PROGRAM_ID、TOKEN_2022_PROGRAM_ID 比对，返回对应的 program 枚举与 programId；账户不存在或 owner 无法识别时抛出明确错误。复用 ClusterConnection（任务2）获取账户信息。",
+            "details": "实现 getMintProgram(mint)：调用 getAccountInfo 获取该 mint 账户的 owner 字段，与 SystemProgram.programId、TOKEN_PROGRAM_ID、TOKEN_2022_PROGRAM_ID 比对，返回对应的 program 枚举与 programId；账户不存在或 owner 无法识别时抛出明确错误。复用 ClusterConnection（任务2）获取账户信息。\n<info added on 2026-11-06T10:01:33.738Z>\n已完成 getMintProgram：读取 mint 账户 owner 判别 spl-token 与 token-2022 程序；账户不存在时抛出 MINT_NOT_FOUND 错误，错误信息提示核对当前连接集群是否正确；owner 非已知 token 程序时抛出 NOT_A_MINT 错误，错误信息提示可省略 mint 参数以改转原生 SOL。\n</info added on 2026-11-06T10:01:33.738Z>",
             "status": "pending",
             "testStrategy": "单元测试：mock Connection 返回不同 owner 的账户数据，断言返回 System/Token/Token2022；无效 mint 地址与未知 owner 抛错。",
             "parentId": "undefined"
@@ -264,7 +265,7 @@
             "dependencies": [
               1
             ],
-            "details": "根据 getMintProgram 的结果构造转账指令：原生 SOL 走 SystemProgram.transfer；SPL Token 与 Token2022 分别用对应程序的 createTransferCheckedInstruction（带 decimals 校验），源与目标 ATA 通过 getAssociatedTokenAddress 推导（Token2022 使用其自己的 ATA program id）。统一封装为 buildTransferInstruction(params) 返回 TransactionInstruction。",
+            "details": "根据 getMintProgram 的结果构造转账指令：原生 SOL 走 SystemProgram.transfer；SPL Token 与 Token2022 分别用对应程序的 createTransferCheckedInstruction（带 decimals 校验），源与目标 ATA 通过 getAssociatedTokenAddress 推导（Token2022 使用其自己的 ATA program id）。统一封装为 buildTransferInstruction(params) 返回 TransactionInstruction。\n<info added on 2026-11-06T10:01:44.959Z>\n完成 buildTransferInstructions 分派逻辑：原生 SOL 分派至 SystemProgram.transfer，amount 超过 Number.MAX_SAFE_INTEGER 时抛出 AMOUNT_OVERFLOW 错误；若 SOL 转账误传 decimals 参数则抛出 DECIMALS_UNEXPECTED 错误。SPL Token 与 Token2022 统一使用 transferChecked（createTransferCheckedInstruction），必须提供 decimals 参数，缺省抛出 DECIMALS_REQUIRED；构造指令前校验源 ATA 存在性，源 ATA 不存在时抛出 SOURCE_ATA_MISSING。\n</info added on 2026-11-06T10:01:44.959Z>",
             "status": "pending",
             "testStrategy": "单元测试：三种 program 下生成的指令 programId 与数据布局正确；decimals 不匹配时抛错；Token2022 使用正确的 ATA 地址。",
             "parentId": "undefined"
@@ -276,7 +277,7 @@
             "dependencies": [
               2
             ],
-            "details": "在组装交易时检查目标 ATA 是否存在；若不存在且 allowAtaCreation 为 true，则前置 createAssociatedTokenAccountIdempotentInstruction（幂等，已存在时为 no-op）；allowAtaCreation 为 false 且 ATA 缺失时抛出明确错误并提示开启开关。Token2022 需使用对应 ATA program id。",
+            "details": "在组装交易时检查目标 ATA 是否存在；若不存在且 allowAtaCreation 为 true，则前置 createAssociatedTokenAccountIdempotentInstruction（幂等，已存在时为 no-op）；allowAtaCreation 为 false 且 ATA 缺失时抛出明确错误并提示开启开关。Token2022 需使用对应 ATA program id。\n<info added on 2026-11-06T10:01:57.965Z>\n已完成 prepareDestinationAta 实现：组装交易前检查目标 ATA 存在性，缺失且 allowAtaCreation=false 时抛出 ATA_MISSING 错误，hint 中说明创建 ATA 约需 0.002 SOL rent；缺失且允许创建时前置 createAssociatedTokenAccountIdempotentInstruction，幂等指令可消除存在性检查与交易上链之间的竞态（已存在时为 no-op）；Token2022 场景使用对应的 ATA programId 派生地址；函数返回 destinationAtaCreated 布尔标记，供转账回执向调用方报告本次是否新建了目标 ATA。\n</info added on 2026-11-06T10:01:57.965Z>",
             "status": "pending",
             "testStrategy": "单元测试：mock 账户存在/不存在 × 开关开/关 四种组合，断言是否包含幂等 ATA 指令或抛错；幂等指令在账户已存在时仍可安全发送。",
             "parentId": "undefined"
@@ -288,7 +289,7 @@
             "dependencies": [
               2
             ],
-            "details": "在 ClusterConnection 上封装 dryRun(tx)：构造 VersionedTransaction 后调用 connection.simulateTransaction，收集 logs、unitsConsumed、err；dryRun 开关为 true 时仅模拟不发送，false 时走 sendWithRetry 正常发送。模拟失败时返回完整日志便于排查，不产生链上签名。",
+            "details": "在 ClusterConnection 上封装 dryRun(tx)：构造 VersionedTransaction 后调用 connection.simulateTransaction，收集 logs、unitsConsumed、err；dryRun 开关为 true 时仅模拟不发送，false 时走 sendWithRetry 正常发送。模拟失败时返回完整日志便于排查，不产生链上签名。\n<info added on 2026-11-06T10:02:07.176Z>\n已完成实现：dryRun(conn, tx) 内部调用 connection.simulateTransaction 时传入参数 { sigVerify: false, replaceRecentBlockhash: true }，成功收集返回结果中的 logs、unitsConsumed 与 err 三个字段。测试踩坑记录：单元测试中伪造 recentBlockhash 时必须使用 32 字节公钥字符串（合法 base58 编码）充当 blockhash；若使用短字符串如 'BH'，消息编译阶段会抛出 Blob.encode 长度校验错误，导致用例失败。\n</info added on 2026-11-06T10:02:07.176Z>",
             "status": "pending",
             "testStrategy": "单元测试：mock simulateTransaction 返回成功/失败两种结果，断言 logs/units 收集正确；dryRun=true 时断言未调用 sendRawTransaction。",
             "parentId": "undefined"
@@ -300,7 +301,7 @@
             "dependencies": [
               4
             ],
-            "details": "整合以上环节为 transfer() 主流程：识别 program → 构建指令（含可选 ATA）→ 可选 dry-run → 签名发送（遵守 allowMainnet，复用任务2的 sendWithRetry）→ 等待确认 → 组装 TransferResult {signature, slot, fee, logs, error?}；发送或确认失败时用任务4的错误解析器转换为用户友好的错误详情填入 error 字段。",
+            "details": "整合以上环节为 transfer() 主流程：识别 program → 构建指令（含可选 ATA）→ 可选 dry-run → 签名发送（遵守 allowMainnet，复用任务2的 sendWithRetry）→ 等待确认 → 组装 TransferResult {signature, slot, fee, logs, error?}；发送或确认失败时用任务4的错误解析器转换为用户友好的错误详情填入 error 字段。\n<info added on 2026-11-06T10:02:17.316Z>\n已完成 transfer() 编排主流程：识别 program → 构建指令（含可选 ATA）→ 可选 dry-run → 签名 → sendWithRetry 发送并等待确认 → 组装 TransferResult 回执。设计决策：发送或确认失败时不抛出异常，而是集成任务4的 parseTransactionError 将错误转换为用户友好的错误详情填入 TransferResult.error 字段返回，使 MCP/AI 调用方获得可编程的结构化响应而非中断式异常。TransferRequest 新增可选 policy 字段用于透传发送策略（如 retries），测试中通过 retries:1 跳过退避等待以加速用例执行。本环节新增测试 13 个，覆盖编排各分支与错误路径；全模块合计 81 个测试全部通过。\n</info added on 2026-11-06T10:02:17.316Z>",
             "status": "pending",
             "testStrategy": "单元测试：全流程 mock 验证 TransferResult 字段完整性、fee 计算、错误解析集成；无 allowMainnet 时拒绝发送；devnet 可选集成测试（默认 skip）执行一笔真实转账并断言回执。",
             "parentId": "undefined"
@@ -308,7 +309,8 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 5,
-        "expansionPrompt": "将任务5拆分为：1) getMintProgram：通过 account owner 识别 System/Token/Token2022；2) buildTransferInstruction 三种程序指令分派；3) ATA 自动创建（idempotent 指令 + allowAtaCreation 开关）；4) dry-run simulateTransaction 实现（收集 logs/units）；5) TransferResult 回执组装与错误解析集成；6) 单元测试与可选 devnet 转账集成测试。"
+        "expansionPrompt": "将任务5拆分为：1) getMintProgram：通过 account owner 识别 System/Token/Token2022；2) buildTransferInstruction 三种程序指令分派；3) ATA 自动创建（idempotent 指令 + allowAtaCreation 开关）；4) dry-run simulateTransaction 实现（收集 logs/units）；5) TransferResult 回执组装与错误解析集成；6) 单元测试与可选 devnet 转账集成测试。",
+        "updatedAt": "2026-11-06T10:02:19.692Z"
       },
       {
         "id": "6",
@@ -992,9 +994,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-06T09:46:05.520Z",
+      "lastModified": "2026-11-06T10:02:19.692Z",
       "taskCount": 14,
-      "completedCount": 3,
+      "completedCount": 5,
       "tags": [
         "master"
       ]

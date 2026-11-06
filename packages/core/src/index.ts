@@ -36,3 +36,36 @@ export {
 } from "./connection/errors.js";
 
 export * from "./wallet/index.js";
+
+export {
+  formatAmount,
+  parseAmount,
+  lamportsToSol,
+  solToLamports,
+} from "./utils/amount.js";
+
+export {
+  parseTransactionError,
+  type ParsedProgramError,
+} from "./utils/parse-error.js";
+
+export {
+  getMintProgram,
+  type MintProgram,
+  type TokenProgramKind,
+} from "./transfer/program.js";
+
+export {
+  buildTransferInstructions,
+  TOKEN_PROGRAM_IDS,
+  type BuildTransferOptions,
+  type BuiltTransfer,
+} from "./transfer/build.js";
+
+export { dryRun, type DryRunResult } from "./transfer/dryrun.js";
+
+export {
+  transfer,
+  type TransferRequest,
+  type TransferResult,
+} from "./transfer/transfer.js";
