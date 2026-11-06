@@ -687,7 +687,7 @@
           "9",
           "10"
         ],
-        "status": "pending",
+        "status": "in-progress",
         "subtasks": [
           {
             "id": 1,
@@ -765,7 +765,8 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 6,
-        "expansionPrompt": "将任务11拆分为：1) MCP Server 骨架（McpServer + stdio 传输 + bin 入口支持 npx）；2) 钱包与状态类工具注册（createWallet/importWallet/getBalances/getClusterStatus/requestAirdrop）含 inputSchema；3) 转账类工具（transfer/batchTransfer/mixedTransfer）；4) 代币与多签类工具（createToken/manageToken2022/multisig 系列）；5) 统一输出脱敏器集成；6) schema 校验测试 + SDK client 内存端到端测试 + 密钥泄露断言。"
+        "expansionPrompt": "将任务11拆分为：1) MCP Server 骨架（McpServer + stdio 传输 + bin 入口支持 npx）；2) 钱包与状态类工具注册（createWallet/importWallet/getBalances/getClusterStatus/requestAirdrop）含 inputSchema；3) 转账类工具（transfer/batchTransfer/mixedTransfer）；4) 代币与多签类工具（createToken/manageToken2022/multisig 系列）；5) 统一输出脱敏器集成；6) schema 校验测试 + SDK client 内存端到端测试 + 密钥泄露断言。",
+        "updatedAt": "2026-11-06T10:22:37.218Z"
       },
       {
         "id": "12",
@@ -994,7 +995,7 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-06T10:02:19.692Z",
+      "lastModified": "2026-11-06T10:22:37.218Z",
       "taskCount": 14,
       "completedCount": 5,
       "tags": [

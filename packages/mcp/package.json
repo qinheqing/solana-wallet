@@ -4,7 +4,7 @@
   "description": "MCP server exposing solana-wallet testing tools to AI clients",
   "type": "module",
   "bin": {
-    "solwallet-mcp": "./dist/index.js"
+    "solwallet-mcp": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
     "@solwallet/core": "workspace:*",
     "zod": "^3.24.0"
   },

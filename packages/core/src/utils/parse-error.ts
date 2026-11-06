@@ -5,6 +5,8 @@
  */
 import { SolanaJSONRPCError } from "@solana/web3.js";
 
+import { SolwalletError, TransactionSendError } from "../connection/errors.js";
+
 export interface ParsedProgramError {
   /** Stable machine code, e.g. INSUFFICIENT_FUNDS, BLOCKHASH_EXPIRED. */
   code: number | string;
@@ -67,6 +69,20 @@ const RULES: Rule[] = [
 
 /** Never throws — unparseable errors come back as {code: "UNKNOWN"}. */
 export function parseTransactionError(error: unknown): ParsedProgramError {
+  // Wrapper errors (e.g. SEND_FAILED after retries) carry the root cause —
+  // the specific reason (insufficient funds, expiry…) is what's actionable.
+  if (error instanceof TransactionSendError) {
+    const cause = (error as { cause?: unknown }).cause;
+    if (cause !== undefined) {
+      const inner = parseTransactionError(cause);
+      if (inner.code !== "UNKNOWN") return inner;
+    }
+    return { code: error.code, message: error.message, suggestion: error.hint ?? "" };
+  }
+  // Other structured errors already carry code + hint — pass them through.
+  if (error instanceof SolwalletError) {
+    return { code: error.code, message: error.message, suggestion: error.hint ?? "" };
+  }
   if (error instanceof SolanaJSONRPCError) {
     const code: number | string =
       typeof error.code === "number" || typeof error.code === "string"

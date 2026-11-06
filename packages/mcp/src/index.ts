@@ -1,10 +1,7 @@
-#!/usr/bin/env node
 /**
- * @solwallet/mcp — MCP server entry point.
- * Tool definitions are added in task #11.
+ * @solwallet/mcp — MCP server exposing Solana wallet testing tools.
+ * See cli.ts for the stdio entry; server.ts for tool registration.
  */
-import { CORE_VERSION } from "@solwallet/core";
-
-const ready = true;
-if (!ready) throw new Error("unreachable");
-export const MCP_VERSION = CORE_VERSION;
+export { buildMcpServer, SERVER_NAME, SERVER_VERSION, type McpServerOptions } from "./server.js";
+export { ConnectionManager, WalletStore, type StoredWallet } from "./state.js";
+export { makeSanitizer } from "./output.js";
