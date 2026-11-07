@@ -80,6 +80,24 @@ const payer = Keypair.generate();
 const recipient = Keypair.generate().publicKey;
 
 describe("buildTransferInstructions (5.1–5.3)", () => {
+  it("rejects zero and negative amounts before touching the network (14.2 boundary)", async () => {
+    const { conn } = fakeConn();
+    await expect(
+      buildTransferInstructions(conn, {
+        payer: payer.publicKey,
+        destination: recipient,
+        amount: 0n,
+      }),
+    ).rejects.toMatchObject({ code: "AMOUNT_ZERO_OR_NEGATIVE" });
+    await expect(
+      buildTransferInstructions(conn, {
+        payer: payer.publicKey,
+        destination: recipient,
+        amount: -1n,
+      }),
+    ).rejects.toMatchObject({ code: "AMOUNT_ZERO_OR_NEGATIVE" });
+  });
+
   it("SOL transfer → single SystemProgram instruction", async () => {
     const { conn, mint } = fakeConn();
     const built = await buildTransferInstructions(conn, {
@@ -169,6 +187,30 @@ describe("buildTransferInstructions (5.1–5.3)", () => {
         allowAtaCreation: false,
       }),
     ).rejects.toMatchObject({ code: "ATA_MISSING" });
+  });
+
+  it("existing destination ATA → never duplicates the creation instruction (14.3 boundary)", async () => {
+    const mint = Keypair.generate().publicKey;
+    const destAta = getAssociatedTokenAddressSync(
+      mint,
+      recipient,
+      true,
+      TOKEN_PROGRAM_ID,
+    ).toBase58();
+    const { conn } = fakeConn({ mint, existingAtas: [destAta] });
+    const built = await buildTransferInstructions(conn, {
+      payer: payer.publicKey,
+      destination: recipient,
+      mint,
+      amount: 1n,
+      decimals: 6,
+      allowAtaCreation: true, // even when allowed, an existing ATA must not be re-created
+    });
+    expect(built.destinationAtaCreated).toBe(false);
+    expect(built.instructions).toHaveLength(1); // transferChecked only, no ATA-create ix
+    expect(
+      built.instructions.every((ix) => !ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)),
+    ).toBe(true);
   });
 
   it("unknown mint → MINT_NOT_FOUND; non-mint account → NOT_A_MINT", async () => {

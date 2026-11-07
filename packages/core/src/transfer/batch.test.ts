@@ -187,6 +187,41 @@ describe("splitIntoBatches (6.2)", () => {
     expect(batches[1]!.estimatedBytes).toBeLessThanOrEqual(DEFAULT_SIZE_BUDGET_BYTES);
   });
 
+  it("rejects maxInstructionsPerTx < 1 (14.2 boundary)", () => {
+    expect(() =>
+      splitIntoBatches([solItem()], { payerKey: payer.publicKey, maxInstructionsPerTx: 0 }),
+    ).toThrowError(/maxInstructionsPerTx must be/);
+    expect(() =>
+      splitIntoBatches([solItem()], { payerKey: payer.publicKey, maxInstructionsPerTx: -1 }),
+    ).toThrowError(/maxInstructionsPerTx must be/);
+  });
+
+  it("rejects sizeBudgetBytes < 1 (14.2 boundary)", () => {
+    expect(() =>
+      splitIntoBatches([solItem()], { payerKey: payer.publicKey, sizeBudgetBytes: 0 }),
+    ).toThrowError(/sizeBudgetBytes must be/);
+  });
+
+  it("empty item list → empty batch list (14.2 boundary)", () => {
+    expect(splitIntoBatches([], { payerKey: payer.publicKey })).toEqual([]);
+  });
+
+  it("single item → exactly one batch (14.2 boundary)", () => {
+    const batches = splitIntoBatches([solItem()], { payerKey: payer.publicKey });
+    expect(batches.length).toBe(1);
+    expect(batches[0]!.items.length).toBe(1);
+  });
+
+  it("exact division (count cap) → no partial tail batch (14.2 boundary)", () => {
+    const items = Array.from({ length: 16 }, () => solItem()); // 16 / 8 = 2 exactly
+    const batches = splitIntoBatches(items, {
+      payerKey: payer.publicKey,
+      maxInstructionsPerTx: 8,
+    });
+    expect(batches.length).toBe(2);
+    for (const b of batches) expect(b.items.length).toBe(8);
+  });
+
   it("custom caps are honored (small explicit budget)", () => {
     const items = Array.from({ length: 20 }, () => solItem());
     const batches = splitIntoBatches(items, { payerKey: payer.publicKey, sizeBudgetBytes: 300 });

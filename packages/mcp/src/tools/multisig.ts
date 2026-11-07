@@ -28,6 +28,16 @@ export function registerMultisigTools(
 ): void {
   const { connections, run } = deps;
 
+  // propose_multisig returns transactionIndex as a numeric string (it is
+  // internally a bigint, serialized that way to survive values beyond
+  // Number.MAX_SAFE_INTEGER). Accept both shapes here so a client that
+  // simply forwards that return value — the obvious, expected usage —
+  // doesn't hit a schema-validation error.
+  const transactionIndexParam = z
+    .union([z.number().int().min(0), z.string().regex(/^\d+$/, "must be a non-negative integer string")])
+    .transform((v) => (typeof v === "string" ? Number(v) : v))
+    .describe("Proposal number (from propose_multisig's result or get_multisig's proposal list). Accepts a number or numeric string.");
+
   const clusterParam = z
     .string()
     .optional()
@@ -157,7 +167,7 @@ export function registerMultisigTools(
       inputSchema: {
         walletName: z.string().describe("Loaded wallet of a multisig member voting yes."),
         multisigPda: z.string().describe("Multisig address."),
-        transactionIndex: z.number().int().min(0).describe("Proposal number (from propose_multisig result or list inside get_multisig)."),
+        transactionIndex: transactionIndexParam,
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true on mainnet-beta."),
         cluster: clusterParam,
@@ -201,7 +211,7 @@ export function registerMultisigTools(
       inputSchema: {
         walletName: z.string().describe("Loaded wallet of a member submitting the execution (pays the outer fee)."),
         multisigPda: z.string().describe("Multisig address."),
-        transactionIndex: z.number().int().min(0).describe("Proposal number to execute."),
+        transactionIndex: transactionIndexParam,
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true on mainnet-beta."),
         cluster: clusterParam,

@@ -184,13 +184,16 @@ function worldWithMultisig(proposalStatus: "Active" | "Approved" | "Executed") {
 
   const data = new Map<string, Buffer>();
   registerAccount(data, getProgramConfigPda({})[0], programConfigBuffer(Keypair.generate().publicKey));
+  // Squads V4 indices are 1-based: transactionIndex=1n on the multisig
+  // means "1 transaction/proposal has been created, and it lives at index 1"
+  // (not index 0 — the program's own PDA seeds start counting at 1).
   registerAccount(data, multisigPda, multisigBuffer({ multisigPda, members, threshold: 2, transactionIndex: 1n }));
   registerAccount(
     data,
-    getProposalPda({ multisigPda, transactionIndex: 0n })[0],
+    getProposalPda({ multisigPda, transactionIndex: 1n })[0],
     proposalBuffer({
       multisigPda,
-      transactionIndex: 0n,
+      transactionIndex: 1n,
       status: { __kind: proposalStatus, timestamp: 0n },
       approved: proposalStatus === "Active" ? [m1.publicKey] : [m1.publicKey, m2.publicKey],
     }),
@@ -198,11 +201,11 @@ function worldWithMultisig(proposalStatus: "Active" | "Approved" | "Executed") {
   if (proposalStatus !== "Active") {
     registerAccount(
       data,
-      getTransactionPda({ multisigPda, index: 0n })[0],
+      getTransactionPda({ multisigPda, index: 1n })[0],
       vaultTransactionBuffer({
         multisigPda,
         vaultPda,
-        transactionIndex: 0n,
+        transactionIndex: 1n,
         recipient: Keypair.generate().publicKey,
       }),
     );
@@ -297,12 +300,17 @@ describe("createMultisigProposal (member)", () => {
 
     expect(result.error).toBeUndefined();
     expect(result.signature).toBe("SIG_MS");
-    expect(result.transactionIndex).toBe("1");
+    // The fixture's multisig already has 1 transaction (at index 1), so
+    // this second proposal must land at index 2 — not a raw pass-through
+    // of the on-chain counter (that off-by-one caused a live ConstraintSeeds
+    // failure against the real Squads V4 program; see the fix in
+    // createMultisigProposal).
+    expect(result.transactionIndex).toBe("2");
     expect(result.transactionPda).toBe(
-      getTransactionPda({ multisigPda, index: 1n })[0].toBase58(),
+      getTransactionPda({ multisigPda, index: 2n })[0].toBase58(),
     );
     expect(result.proposalPda).toBe(
-      getProposalPda({ multisigPda, transactionIndex: 1n })[0].toBase58(),
+      getProposalPda({ multisigPda, transactionIndex: 2n })[0].toBase58(),
     );
     expect(result.vaultPda).toBe(vaultPda.toBase58());
 
@@ -360,7 +368,7 @@ describe("createMultisigProposal (member)", () => {
 describe("approveMultisigProposal", () => {
   it("member vote → single proposalApprove instruction with member as signer", async () => {
     const { world, multisigPda, m2 } = memberWorld();
-    const result = await approveMultisigProposal(world.conn, m2, multisigPda, 0);
+    const result = await approveMultisigProposal(world.conn, m2, multisigPda, 1);
 
     expect(result.error).toBeUndefined();
     expect(result.alreadyApproved).toBe(false);
@@ -376,7 +384,7 @@ describe("approveMultisigProposal", () => {
     // m2 is the fee payer / signer of the outer transaction.
     expect(tx.message.staticAccountKeys[0]!.toBase58()).toBe(m2.publicKey.toBase58());
     // Proposal PDA appears among the instruction accounts (writable).
-    const proposalPda = getProposalPda({ multisigPda, transactionIndex: 0n })[0];
+    const proposalPda = getProposalPda({ multisigPda, transactionIndex: 1n })[0];
     const mentioned = ix!.accountKeyIndexes.some((i) =>
       tx.message.staticAccountKeys[i]!.equals(proposalPda),
     );
@@ -385,7 +393,7 @@ describe("approveMultisigProposal", () => {
 
   it("repeat approval is idempotent — nothing sent", async () => {
     const { world, multisigPda, m1 } = memberWorld();
-    const result = await approveMultisigProposal(world.conn, m1, multisigPda, 0n);
+    const result = await approveMultisigProposal(world.conn, m1, multisigPda, 1n);
     expect(result.alreadyApproved).toBe(true);
     expect(result.signature).toBe("");
     expect(world.sentRaw).toHaveLength(0);
@@ -397,12 +405,12 @@ describe("approveMultisigProposal", () => {
       return { ...w, outsider: Keypair.generate() };
     })();
     await expect(
-      approveMultisigProposal(executed.world.conn, executed.m3, executed.multisigPda, 0),
+      approveMultisigProposal(executed.world.conn, executed.m3, executed.multisigPda, 1),
     ).rejects.toMatchObject({ code: "PROPOSAL_ALREADY_EXECUTED" });
 
     const { world, multisigPda, outsider } = memberWorld();
     await expect(
-      approveMultisigProposal(world.conn, outsider, multisigPda, 0),
+      approveMultisigProposal(world.conn, outsider, multisigPda, 1),
     ).rejects.toMatchObject({ code: "NOT_A_MEMBER" });
   });
 
@@ -419,7 +427,7 @@ describe("executeMultisigProposal", () => {
     const approved = worldWithMultisig("Approved");
     const { world, multisigPda, vaultPda, m3 } = approved;
 
-    const result = await executeMultisigProposal(world.conn, m3, multisigPda, 0);
+    const result = await executeMultisigProposal(world.conn, m3, multisigPda, 1);
     expect(result.error).toBeUndefined();
     expect(result.signature).toBe("SIG_MS");
 
@@ -439,7 +447,7 @@ describe("executeMultisigProposal", () => {
   it("active (not yet approved) proposal → PROPOSAL_NOT_APPROVED with threshold hint", async () => {
     const { world, multisigPda, m2 } = memberWorld();
     await expect(
-      executeMultisigProposal(world.conn, m2, multisigPda, 0),
+      executeMultisigProposal(world.conn, m2, multisigPda, 1),
     ).rejects.toMatchObject({ code: "PROPOSAL_NOT_APPROVED" });
     expect(world.sentRaw).toHaveLength(0);
   });
@@ -448,7 +456,7 @@ describe("executeMultisigProposal", () => {
     const approved = worldWithMultisig("Approved");
     const outsider = Keypair.generate();
     await expect(
-      executeMultisigProposal(approved.world.conn, outsider, approved.multisigPda, 0),
+      executeMultisigProposal(approved.world.conn, outsider, approved.multisigPda, 1),
     ).rejects.toMatchObject({ code: "NOT_A_MEMBER" });
   });
 });
@@ -474,8 +482,8 @@ describe("getMultisigState / listProposals", () => {
 
   it("listProposals maps statuses and approvals; missing proposals skipped", async () => {
     const { world, multisigPda, m1 } = memberWorld();
-    // Register a second proposal (index would collide — proposal 0 exists,
-    // transactionIndex is 1n so only index 0 is probed). Assert on index 0.
+    // Fixture's multisig has transactionIndex=1n (1 transaction created, at
+    // 1-based index 1 — not 0). listProposals probes 1..counter inclusive.
     const list = await listProposals(world.conn, multisigPda);
     expect(list.transactionIndex).toBe("1");
     expect(list.proposals).toHaveLength(1);
@@ -484,7 +492,7 @@ describe("getMultisigState / listProposals", () => {
     expect(p!.executeReady).toBe(false);
     expect(p!.approvedBy).toEqual([m1.publicKey.toBase58()]);
     expect(p!.transactionPda).toBe(
-      getTransactionPda({ multisigPda, index: 0n })[0].toBase58(),
+      getTransactionPda({ multisigPda, index: 1n })[0].toBase58(),
     );
 
     // Executed variant reports executed + executeReady=false.

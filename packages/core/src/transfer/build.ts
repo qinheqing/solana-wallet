@@ -86,6 +86,19 @@ export async function buildTransferInstructions(
 ): Promise<BuiltTransfer> {
   const allowAtaCreation = opts.allowAtaCreation ?? true;
 
+  // A zero/negative transfer is never a legitimate intent — it either wastes
+  // the network fee for no effect or indicates an upstream bug (e.g. a
+  // mis-parsed amount). Reject before touching the network.
+  if (opts.amount <= 0n) {
+    throw new SolwalletError(
+      `Transfer amount must be positive, got ${opts.amount.toString()}.`,
+      {
+        code: "AMOUNT_ZERO_OR_NEGATIVE",
+        hint: "Pass an amount greater than zero. A zero-amount transfer has no effect and only wastes the network fee.",
+      },
+    );
+  }
+
   // Native SOL — no mint, plain System transfer.
   if (!opts.mint) {
     if (opts.decimals !== undefined) {

@@ -29,9 +29,19 @@ describe("formatAmount (4.1)", () => {
   it("supports negatives", () => {
     expect(formatAmount(-1_500_000_000n, 9)).toBe("-1.5");
   });
+
+  it("rejects invalid decimals (14.2 boundary)", () => {
+    expect(() => formatAmount(1n, -1)).toThrowError(/Invalid decimals/);
+    expect(() => formatAmount(1n, 1.5)).toThrowError(/Invalid decimals/);
+  });
 });
 
 describe("parseAmount (4.1)", () => {
+  it("rejects invalid decimals (14.2 boundary)", () => {
+    expect(() => parseAmount("1", -1)).toThrowError(/Invalid decimals/);
+    expect(() => parseAmount("1", 1.5)).toThrowError(/Invalid decimals/);
+  });
+
   it("parses exact base units", () => {
     expect(parseAmount("123.456789", 6)).toBe(123456789n);
     expect(parseAmount("1", 9)).toBe(1_000_000_000n);

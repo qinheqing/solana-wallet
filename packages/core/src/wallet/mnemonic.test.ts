@@ -48,6 +48,24 @@ describe("importFromMnemonic (3.2)", () => {
     await expect(importFromMnemonic("single")).rejects.toThrowError(/Invalid BIP39 mnemonic/);
   });
 
+  it("rejects a wrong word count (14.1 boundary: neither 12 nor 24 words)", async () => {
+    // 15 otherwise-valid-looking words — BIP39 only accepts 12/15/18/21/24,
+    // and this phrase's checksum is wrong for 15 anyway (common off-by-N bug).
+    const fifteen = Array.from({ length: 15 }, () => "abandon").join(" ");
+    await expect(importFromMnemonic(fifteen)).rejects.toThrowError(/Invalid BIP39 mnemonic/);
+  });
+
+  it("rejects a mnemonic containing a word outside the BIP39 wordlist", async () => {
+    const withJunkWord =
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon xyzzy";
+    await expect(importFromMnemonic(withJunkWord)).rejects.toThrowError(/Invalid BIP39 mnemonic/);
+  });
+
+  it("rejects an empty string distinctly from a short phrase", async () => {
+    await expect(importFromMnemonic("")).rejects.toThrowError(/Invalid BIP39 mnemonic/);
+    await expect(importFromMnemonic("   ")).rejects.toThrowError(/Invalid BIP39 mnemonic/);
+  });
+
   it("newMnemonic generates valid 12/24-word phrases", async () => {
     const m12 = newMnemonic(128);
     const m24 = newMnemonic(256);

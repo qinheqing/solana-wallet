@@ -521,7 +521,12 @@ export async function createMultisigProposal(
     );
   }
 
-  const transactionIndex = utils.toBigInt(multisig.transactionIndex);
+  // Squads V4 indices are 1-based: multisig.transactionIndex tracks the
+  // highest index CREATED SO FAR (0 on a brand-new multisig), so the next
+  // transaction/proposal PDA must be derived at index+1 — using the raw
+  // counter here collides with the program's own PDA derivation and the
+  // instruction fails on-chain with ConstraintSeeds (error 2006).
+  const transactionIndex = utils.toBigInt(multisig.transactionIndex) + 1n;
 
   // Inner message: the vault is the payer/signer; the multisig program
   // re-signs it with the vault PDA at execution time.
@@ -742,8 +747,9 @@ export interface MultisigProposalList {
 
 /**
  * List all proposals on a multisig. Probes proposal PDAs for indexes
- * 0..transactionIndex-1 (proposals are optional companions of vault
- * transactions, so gaps are simply skipped).
+ * 1..transactionIndex (Squads V4 indices are 1-based — transactionIndex is
+ * the highest index created so far, not an exclusive upper bound; proposals
+ * are optional companions of vault transactions, so gaps are simply skipped).
  */
 export async function listProposals(
   conn: ClusterConnection,
@@ -753,7 +759,7 @@ export async function listProposals(
   const total = BigInt(state.transactionIndex);
 
   const proposals = await Promise.all(
-    Array.from({ length: Number(total) }, (_, i) => BigInt(i)).map(async (index) => {
+    Array.from({ length: Number(total) }, (_, i) => BigInt(i + 1)).map(async (index) => {
       const [proposalPda] = getProposalPda({ multisigPda, transactionIndex: index });
       const [transactionPda] = getTransactionPda({ multisigPda, index });
       const info = await conn.connection.getAccountInfo(proposalPda);

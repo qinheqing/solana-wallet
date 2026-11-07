@@ -45,4 +45,20 @@ describe("encrypted keystore (3.3)", () => {
   it("enforces minimum password length", async () => {
     await expect(encryptJson(PAYLOAD(), "short")).rejects.toThrowError(/at least 8/);
   });
+
+  it("rejects an empty password (14.1 boundary)", async () => {
+    await expect(encryptJson(PAYLOAD(), "")).rejects.toThrowError(/at least 8/);
+  });
+
+  it("accepts a very long password and still roundtrips (14.1 boundary)", async () => {
+    const payload = PAYLOAD();
+    const longPassword = "correct horse battery staple ".repeat(50); // 1500 chars
+    const store = await encryptJson(payload, longPassword);
+    const out = await decryptJson<typeof payload>(store, longPassword);
+    expect(out).toEqual(payload);
+    // A near-identical but truncated password must fail, not partially match.
+    await expect(
+      decryptJson(store, longPassword.slice(0, -1)),
+    ).rejects.toThrowError(/wrong password or corrupted/);
+  });
 });
