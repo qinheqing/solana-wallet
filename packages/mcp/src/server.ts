@@ -9,6 +9,7 @@ import { parseTransactionError } from "@solwallet/core";
 import { z } from "zod";
 
 import { makeSanitizer } from "./output.js";
+import { registerMultisigTools } from "./tools/multisig.js";
 import { registerTokenTools } from "./tools/token.js";
 import { registerTransferTools } from "./tools/transfer.js";
 import { registerWalletTools } from "./tools/wallet.js";
@@ -69,6 +70,7 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
   registerWalletTools(server, deps, z);
   registerTransferTools(server, deps, z);
   registerTokenTools(server, deps, z);
+  registerMultisigTools(server, deps, z);
 
   return server;
 }

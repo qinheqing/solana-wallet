@@ -1,0 +1,384 @@
+/**
+ * Token mint creation (task #8): classic SPL mints and Token-2022 mints
+ * with optional extensions, all in ONE transaction per mint.
+ *
+ * Extension space is computed via getMintLen(extensions) — including the
+ * variable-length TokenMetadata TLV — so the mint account is allocated
+ * rent-exempt correctly up front.
+ */
+import {
+  AccountState,
+  ExtensionType,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  createInitializeDefaultAccountStateInstruction,
+  createInitializeInterestBearingMintInstruction,
+  createInitializeMetadataPointerInstruction,
+  createInitializeMint2Instruction,
+  createInitializeMintInstruction,
+  createInitializeNonTransferableMintInstruction,
+  createInitializePermanentDelegateInstruction,
+  createInitializeTransferFeeConfigInstruction,
+  createInitializeTransferHookInstruction,
+  getMintLen,
+} from "@solana/spl-token";
+import { createInitializeInstruction, pack } from "@solana/spl-token-metadata";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  type TransactionInstruction,
+} from "@solana/web3.js";
+
+import type { ClusterConnection } from "../connection/connection.js";
+import { SolwalletError } from "../connection/errors.js";
+import {
+  signAndSendTokenTx,
+  toPublicKey,
+  type SendTokenOptions,
+  type TokenTxResult,
+} from "./internal.js";
+
+const MAX_DECIMALS = 18; // u256-based supply; SPL tooling caps at 18
+const MAX_BPS = 10_000; // 100% in basis points
+const MIN_I16 = -32_768;
+const MAX_I16 = 32_767;
+
+export interface CreateMintOptions extends SendTokenOptions {
+  decimals: number;
+  /** Defaults to the paying wallet. */
+  mintAuthority?: string | Keypair | PublicKey;
+  /** Defaults to the paying wallet. Pass null to omit (no freezing). */
+  freezeAuthority?: string | Keypair | PublicKey | null;
+}
+
+/** Token-2022 extension configuration (each entry enables one extension). */
+export interface Token2022ExtensionOptions {
+  transferFeeConfig?: {
+    /** Fee in basis points, 0–10000. */
+    transferFeeBasisPoints: number;
+    /** Maximum fee in base units (bigint-safe). */
+    maximumFee: bigint | number | string;
+  };
+  transferHook?: {
+    /** Program invoked on every transfer of this mint. */
+    programId: string | PublicKey;
+  };
+  interestBearingConfig?: {
+    /** Signed interest rate in basis points, i16 on chain. */
+    rate: number;
+  };
+  nonTransferable?: boolean;
+  permanentDelegate?: {
+    /** Delegate allowed to transfer/burn ANY account of this mint. */
+    delegate: string | PublicKey;
+  };
+  /** On-chain metadata; implies a MetadataPointer pointing at the mint itself. */
+  tokenMetadata?: {
+    name: string;
+    symbol: string;
+    uri: string;
+  };
+  defaultAccountState?: {
+    /** Only 'frozen' is representable (accounts start frozen). */
+    accountState: "frozen";
+  };
+}
+
+export interface CreateTokenResult extends TokenTxResult {
+  mint: string;
+  /** Enabled extension names, e.g. ["transferFeeConfig", "tokenMetadata"]. */
+  extensions: string[];
+}
+
+/** Validate shared mint parameters before building anything. */
+function validateMintParams(opts: CreateMintOptions): void {
+  if (
+    !Number.isInteger(opts.decimals) ||
+    opts.decimals < 0 ||
+    opts.decimals > MAX_DECIMALS
+  ) {
+    throw new SolwalletError(
+      `decimals must be an integer between 0 and ${MAX_DECIMALS}, got ${opts.decimals}.`,
+      {
+        code: "DECIMALS_INVALID",
+        hint: "Common values: 9 (SOL-like), 6 (USDC-like), 0 (NFT-like supply).",
+      },
+    );
+  }
+}
+
+function validateExtensions(ext: Token2022ExtensionOptions): void {
+  const fee = ext.transferFeeConfig;
+  if (fee) {
+    if (
+      !Number.isInteger(fee.transferFeeBasisPoints) ||
+      fee.transferFeeBasisPoints < 0 ||
+      fee.transferFeeBasisPoints > MAX_BPS
+    ) {
+      throw new SolwalletError(
+        `transferFeeBasisPoints must be an integer between 0 and ${MAX_BPS}, got ${fee.transferFeeBasisPoints}.`,
+        {
+          code: "TRANSFER_FEE_INVALID",
+          hint: "Basis points are 1/100th of a percent: 100 = 1%, 10000 = 100%. The maximum fee itself is set with maximumFee in base units.",
+        },
+      );
+    }
+    if (BigInt(fee.maximumFee) < 0n) {
+      throw new SolwalletError("maximumFee must be a non-negative integer.", {
+        code: "TRANSFER_FEE_INVALID",
+        hint: "maximumFee is the fee cap in token base units (bigint-compatible value).",
+      });
+    }
+  }
+  const interest = ext.interestBearingConfig;
+  if (
+    interest &&
+    (!Number.isInteger(interest.rate) ||
+      interest.rate < MIN_I16 ||
+      interest.rate > MAX_I16)
+  ) {
+    throw new SolwalletError(
+      `interest rate must be an integer between ${MIN_I16} and ${MAX_I16}, got ${interest.rate}.`,
+      {
+        code: "INTEREST_RATE_INVALID",
+        hint: "The rate is stored as a signed i16 on chain. Use 0 for a non-interest-bearing start.",
+      },
+    );
+  }
+  const meta = ext.tokenMetadata;
+  if (meta && (meta.name.length === 0 || meta.symbol.length === 0)) {
+    throw new SolwalletError("tokenMetadata requires a non-empty name and symbol.", {
+      code: "METADATA_INVALID",
+      hint: "name and symbol are required fields of Token-2022 on-chain metadata; uri may be an empty string.",
+    });
+  }
+  if (ext.defaultAccountState && ext.defaultAccountState.accountState !== "frozen") {
+    throw new SolwalletError(
+      `defaultAccountState must be "frozen" (got "${ext.defaultAccountState.accountState}").`,
+      {
+        code: "ACCOUNT_STATE_INVALID",
+        hint: "Only a frozen default is representable on chain: new accounts start frozen until a freeze authority thaws them.",
+      },
+    );
+  }
+  if (ext.nonTransferable && (ext.transferFeeConfig || ext.transferHook)) {
+    throw new SolwalletError(
+      "nonTransferable is incompatible with transferFeeConfig and transferHook.",
+      {
+        code: "EXTENSIONS_INCOMPATIBLE",
+        hint: "A non-transferable mint never executes transfers, so fee/hooks on transfers are meaningless and rejected.",
+      },
+    );
+  }
+}
+
+function authorityKey(
+  value: string | Keypair | PublicKey | null | undefined,
+  fallback: PublicKey,
+): PublicKey | null {
+  if (value === null) return null;
+  if (value === undefined) return fallback;
+  return value instanceof Keypair ? value.publicKey : toPublicKey(value);
+}
+
+/**
+ * Create a classic SPL Token mint in one transaction:
+ * System createAccount + initializeMint.
+ */
+export async function createSplToken(
+  conn: ClusterConnection,
+  from: Keypair,
+  opts: CreateMintOptions,
+): Promise<CreateTokenResult> {
+  validateMintParams(opts);
+  const mint = Keypair.generate();
+  const mintAuthority = authorityKey(opts.mintAuthority, from.publicKey)!;
+  const freezeAuthority = authorityKey(opts.freezeAuthority, from.publicKey);
+
+  const lamports = await conn.connection.getMinimumBalanceForRentExemption(82);
+  const instructions = [
+    SystemProgram.createAccount({
+      fromPubkey: from.publicKey,
+      newAccountPubkey: mint.publicKey,
+      lamports,
+      space: 82, // classic Mint layout (no extensions)
+      programId: TOKEN_PROGRAM_ID,
+    }),
+    createInitializeMintInstruction(
+      mint.publicKey,
+      opts.decimals,
+      mintAuthority,
+      freezeAuthority,
+    ),
+  ];
+
+  const result = await signAndSendTokenTx(conn, from, instructions, {
+    dryRun: opts.dryRun,
+    allowMainnet: opts.allowMainnet,
+    policy: opts.policy,
+    extraSigners: [mint],
+  });
+  return { ...result, mint: mint.publicKey.toBase58(), extensions: [] };
+}
+
+/**
+ * Create a Token-2022 mint with optional extensions in one transaction:
+ * System createAccount (space from getMintLen) → extension init instructions
+ * → initializeMint2 → token-metadata init (when configured).
+ */
+export async function createToken2022(
+  conn: ClusterConnection,
+  from: Keypair,
+  opts: CreateMintOptions & { extensions?: Token2022ExtensionOptions },
+): Promise<CreateTokenResult> {
+  validateMintParams(opts);
+  const ext = opts.extensions ?? {};
+  validateExtensions(ext);
+
+  const mint = Keypair.generate();
+  const mintAuthority = authorityKey(opts.mintAuthority, from.publicKey)!;
+  const freezeAuthority = authorityKey(opts.freezeAuthority, from.publicKey);
+  const hasMetadata = ext.tokenMetadata !== undefined;
+
+  // --- account space: fixed extension lengths + variable TokenMetadata TLV
+  const extensionTypes: ExtensionType[] = [];
+  if (ext.transferFeeConfig) extensionTypes.push(ExtensionType.TransferFeeConfig);
+  if (ext.transferHook) extensionTypes.push(ExtensionType.TransferHook);
+  if (ext.interestBearingConfig) extensionTypes.push(ExtensionType.InterestBearingConfig);
+  if (ext.nonTransferable) extensionTypes.push(ExtensionType.NonTransferable);
+  if (ext.permanentDelegate) extensionTypes.push(ExtensionType.PermanentDelegate);
+  if (hasMetadata) extensionTypes.push(ExtensionType.MetadataPointer, ExtensionType.TokenMetadata);
+  if (ext.defaultAccountState) extensionTypes.push(ExtensionType.DefaultAccountState);
+
+  const metadataLen = hasMetadata
+    ? pack({
+        mint: mint.publicKey,
+        updateAuthority: from.publicKey,
+        name: ext.tokenMetadata!.name,
+        symbol: ext.tokenMetadata!.symbol,
+        uri: ext.tokenMetadata!.uri,
+        additionalMetadata: [],
+      }).length
+    : undefined;
+  // Variable-length extensions (TokenMetadata) must NOT be in the fixed list —
+  // their size is passed separately so getMintLen can add type+length headers.
+  const space = getMintLen(
+    metadataLen === undefined
+      ? extensionTypes
+      : extensionTypes.filter((t) => t !== ExtensionType.TokenMetadata),
+    metadataLen === undefined ? undefined : { [ExtensionType.TokenMetadata]: metadataLen },
+  );
+
+  const lamports = await conn.connection.getMinimumBalanceForRentExemption(space);
+
+  const instructions: TransactionInstruction[] = [
+    SystemProgram.createAccount({
+      fromPubkey: from.publicKey,
+      newAccountPubkey: mint.publicKey,
+      lamports,
+      space,
+      programId: TOKEN_2022_PROGRAM_ID,
+    }),
+  ];
+
+  // --- extension initialization (before initializeMint2)
+  if (ext.transferFeeConfig) {
+    instructions.push(
+      createInitializeTransferFeeConfigInstruction(
+        mint.publicKey,
+        from.publicKey, // transfer fee config authority
+        from.publicKey, // withdraw withheld authority
+        ext.transferFeeConfig.transferFeeBasisPoints,
+        BigInt(ext.transferFeeConfig.maximumFee),
+      ),
+    );
+  }
+  if (ext.transferHook) {
+    instructions.push(
+      createInitializeTransferHookInstruction(
+        mint.publicKey,
+        from.publicKey, // hook authority
+        toPublicKey(ext.transferHook.programId),
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+  }
+  if (ext.interestBearingConfig) {
+    instructions.push(
+      createInitializeInterestBearingMintInstruction(
+        mint.publicKey,
+        from.publicKey, // rate authority
+        ext.interestBearingConfig.rate,
+      ),
+    );
+  }
+  if (ext.nonTransferable) {
+    instructions.push(
+      createInitializeNonTransferableMintInstruction(mint.publicKey, TOKEN_2022_PROGRAM_ID),
+    );
+  }
+  if (ext.permanentDelegate) {
+    instructions.push(
+      createInitializePermanentDelegateInstruction(
+        mint.publicKey,
+        toPublicKey(ext.permanentDelegate.delegate),
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+  }
+  if (hasMetadata) {
+    // Pointer first, metadata init later (after initializeMint2).
+    instructions.push(
+      createInitializeMetadataPointerInstruction(
+        mint.publicKey,
+        from.publicKey, // pointer authority
+        mint.publicKey, // metadata lives on the mint itself
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+  }
+  if (ext.defaultAccountState) {
+    instructions.push(
+      createInitializeDefaultAccountStateInstruction(
+        mint.publicKey,
+        AccountState.Frozen,
+      ),
+    );
+  }
+
+  // --- mint core
+  instructions.push(
+    createInitializeMint2Instruction(
+      mint.publicKey,
+      opts.decimals,
+      mintAuthority,
+      freezeAuthority,
+      TOKEN_2022_PROGRAM_ID,
+    ),
+  );
+
+  // --- token metadata last (requires an initialized mint)
+  if (hasMetadata) {
+    instructions.push(
+      createInitializeInstruction({
+        programId: TOKEN_2022_PROGRAM_ID,
+        metadata: mint.publicKey,
+        updateAuthority: from.publicKey,
+        mint: mint.publicKey,
+        mintAuthority,
+        name: ext.tokenMetadata!.name,
+        symbol: ext.tokenMetadata!.symbol,
+        uri: ext.tokenMetadata!.uri,
+      }),
+    );
+  }
+
+  const result = await signAndSendTokenTx(conn, from, instructions, {
+    dryRun: opts.dryRun,
+    allowMainnet: opts.allowMainnet,
+    policy: opts.policy,
+    extraSigners: [mint],
+  });
+  return { ...result, mint: mint.publicKey.toBase58(), extensions: Object.keys(ext) };
+}

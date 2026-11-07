@@ -1,0 +1,15 @@
+[package]
+name = "solwallet-cpi"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal Solana BPF program (pinocchio): batch SOL transfers from a PDA vault via System Program CPI"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pinocchio = "0.7.1"
+
+[profile.release]
+overflow-checks = true
