@@ -2,7 +2,7 @@
   "master": {
     "tasks": [
       {
-        "id": "1",
+        "id": 1,
         "title": "搭建 monorepo 基础工程结构",
         "description": "初始化 pnpm workspace monorepo，含 packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet，配置 TypeScript ≥5.5、Node ≥20、Vitest 与共享 lint 配置",
         "details": "pnpm init workspace；创建 packages/core、packages/mcp、packages/cpi-program、apps/web 目录；根 tsconfig（strict，target ES2022）；pnpm-workspace.yaml 声明 packages/*、apps/*；安装 @solana/web3.js 1.x、@solana/spl-token、@sqds/multisig、@modelcontextprotocol/sdk、Vitest；core 包命名为 @solwallet/core，零 UI 依赖",
@@ -53,7 +53,7 @@
         "updatedAt": "2026-11-06T09:11:49.337Z"
       },
       {
-        "id": "2",
+        "id": 2,
         "title": "实现网络连接与集群管理（F2）",
         "description": "在 core 中封装 ClusterConnection：支持三官方集群 + 自定义 RPC URL、健康检查（slot/版本/TPS）、airdrop、可配置确认策略",
         "details": "定义 ClusterConnection 类/工厂：createConnection(cluster|rpcUrl)；getHealth(): {slot, version, tps}；requestAirdrop 仅限 devnet/testnet；确认策略参数 {commitment: 'confirmed'|'finalized', timeoutMs, retries}；sendWithRetry 封装 confirmTransaction；mainnet-beta 签名/发送需显式 allowMainnet: true 否则抛出风险错误",
@@ -118,7 +118,7 @@
         "updatedAt": "2026-11-06T09:20:09.367Z"
       },
       {
-        "id": "3",
+        "id": 3,
         "title": "实现钱包管理模块（F3）",
         "description": "钱包生成、JSON 密钥导入/导出（solana-keygen 兼容）、BIP39 助记词导入与派生路径、AES-256-GCM 加密存储、SOL/SPL/Token2022 余额查询",
         "details": "使用 @solana/web3.js Keypair + tweetnacl 生成 Ed25519；JSON 密钥格式 [byte array] 与 solana-keygen 兼容；助记词用 bip39 + ed25519-hd-key，默认派生路径 m/44'/501'/0'/0' 可配置；加密存储用 node:crypto AES-256-GCM，导出明文需 explicit confirm 参数；余额查询：getBalance + getTokenAccountsByOwner（覆盖 Token Program 与 Token-2022 Program）；日志/输出脱敏：只输出地址，永不输出密钥与助记词",
@@ -196,7 +196,7 @@
         "updatedAt": "2026-11-06T09:46:05.520Z"
       },
       {
-        "id": "4",
+        "id": 4,
         "title": "实现金额换算与错误解析工具",
         "description": "统一金额工具：最小单位内部计算，展示层精度换算；错误解析器将程序错误映射为可读信息（如 insufficient funds）并附建议动作",
         "details": "formatAmount(rawAmount, decimals) / parseAmount(displayAmount, decimals) 使用 bigint 防精度丢失；错误解析器捕获 SendTransactionError，解析程序错误码（InsufficientFundsForFee、AccountNotFound 等）返回 {code, message, suggestion}",
@@ -236,7 +236,7 @@
         "updatedAt": "2026-11-06T09:51:55.005Z"
       },
       {
-        "id": "5",
+        "id": 5,
         "title": "实现单笔转账核心逻辑（F4.1/F4.5/F4.6）",
         "description": "自动识别 mint 所属 Program（SPL/Token2022/System）；ATA 自动创建可开关；dry-run simulateTransaction 开关；回执含签名、slot、费用、错误详情",
         "details": "getMintProgram(mint) 通过 account owner 判断 System/Token/Token2022；buildTransferInstruction 分派到三种程序；ATA 创建用 createAssociatedTokenAccountIdempotentInstruction，allowAtaCreation 开关；dry-run: simulateTransaction 收集 logs/units；TransferResult: {signature, slot, fee, logs, error?}；复用错误解析器（任务4）",
@@ -313,7 +313,7 @@
         "updatedAt": "2026-11-06T10:02:19.692Z"
       },
       {
-        "id": "6",
+        "id": 6,
         "title": "实现批量转账与混合转账（F4.2/F4.3）",
         "description": "批量转账：智能分批（≤指令上限、交易≤1232 字节），串行发送逐笔报告；混合转账：单笔交易内多 mint（SOL+SPL+Token2022）指令组合",
         "details": "estimateTransactionSize(instructions) 用 packTransaction 或模拟序列化估算字节数；分批算法：按指令数与字节数双约束切分；executeBatchTransfer 串行循环发送，返回 per-recipient 结果数组；executeMixedTransfer 接收 [{mint|'SOL', to, amount}] 合并进单个 VersionedTransaction",
@@ -390,7 +390,7 @@
         "updatedAt": "2026-11-06T18:24:53.961Z"
       },
       {
-        "id": "7",
+        "id": 7,
         "title": "实现示例 CPI 程序与部署支持（F4.4）",
         "description": "用 Anchor 编写最小示例程序：接收指令后通过 CPI 循环完成多笔 Token 转账；提供构建与部署脚本（localnet/testnet）",
         "details": "packages/cpi-program：Anchor 程序 instruction {vault_authority, recipients: Vec<Pubkey>, amounts: Vec<u64>, mint}；循环调用 token::transfer；提供 build（anchor build）与 deploy 脚本；core 提供 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数，仅在 dev/testnet 部署",
@@ -456,7 +456,7 @@
         "updatedAt": "2026-11-07T02:00:30.319Z"
       },
       {
-        "id": "8",
+        "id": 8,
         "title": "实现代币发行（F5.1/F5.2/F5.4）",
         "description": "创建 SPL mint 与 Token2022 mint（可选扩展：Transfer Fee、Transfer Hook、Interest Bearing、Non-Transferable、Permanent Delegate、Metadata Pointer+Token Metadata、Default Account State）；mint/burn",
         "details": "SPL: createMint2/initializeMint（decimals、mint/freeze authority）；Token2022: 组装扩展列表用 @solana/spl-token 的 createInitializeTransferFeeConfigInstruction 等各扩展指令，Metadata 用 Three-Instruction Token Metadata 流程；mintTo/burn 封装统一接口；所有扩展参数结构化定义",
@@ -533,7 +533,7 @@
         "updatedAt": "2026-11-07T02:00:31.669Z"
       },
       {
-        "id": "9",
+        "id": 9,
         "title": "实现 Token2022 插件运行时管理（F5.3）",
         "description": "对已存在 Token2022 mint 运行时管理：更新 Transfer Fee（按 epoch 生效）、冻结/解冻账户、更新 mint/freeze authority、更新元数据",
         "details": "封装 setTransferFee、freezeAccount/thawAccount、setAuthority（MintTokens/FreezeAccount）、updateField（Name/Symbol/Uri/AdditionalMetadata）到 TokenManager 类；每个操作校验当前钱包持有对应 authority，否则给出明确错误与建议",
@@ -598,7 +598,7 @@
         "updatedAt": "2026-11-07T02:00:33.030Z"
       },
       {
-        "id": "10",
+        "id": 10,
         "title": "实现 Squads V4 多签模块（F6）",
         "description": "基于 @sqds/multisig：创建 M-of-N 多签、成员管理与阈值修改、提案创建→审批→执行流程、提案状态查询",
         "details": "封装 MultisigClient：createMultisig(members, threshold)、addMember/removeMember/setThreshold、createTransferProposal(txMessage)、approveProposal、executeProposal、listProposals(status)；提案支持 SOL/SPL/Token2022 转账指令复用任务5的构造逻辑；V4 程序地址三集群默认已部署",
@@ -677,7 +677,7 @@
         "updatedAt": "2026-11-06T18:35:24.761Z"
       },
       {
-        "id": "11",
+        "id": 11,
         "title": "实现 MCP Server（F1.1）",
         "description": "MCP Server（stdio）：每个 core 功能对应一个 MCP 工具，清晰的 inputSchema 与描述；密钥输出默认脱敏",
         "details": "packages/mcp：用 @modelcontextprotocol/sdk 的 McpServer + registerTool；工具清单：createWallet/importWallet/getBalances/transfer/batchTransfer/mixedTransfer/createToken/manageToken2022/multisig 系列/getClusterStatus/requestAirdrop；每个 inputSchema 带描述使 AI 零文档可调用；输出统一脱敏器（任务3）；bin 入口支持 npx 运行",
@@ -774,7 +774,7 @@
         "updatedAt": "2026-11-07T01:57:53.182Z"
       },
       {
-        "id": "12",
+        "id": 12,
         "title": "编写 Claude Skill 与 README 上手指南（F1.2/F1.4）",
         "description": "编写 skills/solana-wallet/SKILL.md（何时用哪个功能与参数约定）；编写 5 分钟上手 README：clone → install → 配置 RPC → 让 AI 接管，含 claude mcp add / .mcp.json 配置片段",
         "details": "SKILL.md 按 MCP 工具分类描述典型任务序列（验收标准1流程）；README 含 npx 启动说明、三种集群 RPC 配置示例（含 Helius/QuickNode 自定义 URL）、风险提示（mainnet allowMainnet）；npm 发布配置 @solwallet/core 与 mcp 包",
@@ -825,7 +825,7 @@
         "updatedAt": "2026-11-06T18:24:55.365Z"
       },
       {
-        "id": "13",
+        "id": 13,
         "title": "实现 Web UI（F7）",
         "description": "React + Vite + Tailwind 单页应用：Dashboard（网络状态+余额）、钱包、转账、代币发行、多签模块；左侧网络与钱包，右侧功能区",
         "details": "apps/web：React Router 或 tab 布局；直接在浏览器调用 RPC（纯前端，无服务器）；复用 core 的纯逻辑函数（指令构造、金额换算）避免重复实现；深色主题技术感设计；转账/导出/发币操作前弹二次确认与风险提示；本地 localStorage 保存交易历史 {signature, status, fee}，链接 Explorer（按 cluster 动态生成）",
@@ -909,7 +909,7 @@
               3,
               4
             ],
-            "details": "代币页面：1) 发行：表单（名称/符号/精度/铸造数量/是否启用 Transfer Fee 扩展、费率与最大费率），复用 core 的 mint 创建与 Token2022 扩展指令构造，浏览器签名发送；发币前二次确认并展示费用与不可逆提示；2) 管理：展示当前钱包持有的 SPL/Token2022 资产列表（mint、精度、余额、扩展属性），支持铸造增发、创建 ATA（开关逻辑复用 core）、转移代币入口跳转转账模块；操作均带确认流程。\n<info added on 2026-11-07T02:14:02.029Z>\n进度更新：已完成（部分简化）。发行表单支持 SPL/Token2022 程序选择、精度、初始供应量设置；扩展配置仅接入 transferFeeConfig 一项的 UI，core 支持的其余 Token2022 扩展暂未接入 UI。管理面板实现当前钱包资产列表展示，以及铸造增发与销毁操作。manage.ts 中已有的冻结/解冻账户、权限轮换（更新 mint/freeze authority）、元数据更新等能力暂未接入 UI，留待后续迭代补充。\n</info added on 2026-11-07T02:14:02.029Z>",
+            "details": "代币页面：1) 发行：表单（名称/符号/精度/铸造数量/是否启用 Transfer Fee 扩展、费率与最大费率），复用 core 的 mint 创建与 Token2022 扩展指令构造，浏览器签名发送；发币前二次确认并展示费用与不可逆提示；2) 管理：展示当前钱包持有的 SPL/Token2022 资产列表（mint、精度、余额、扩展属性），支持铸造增发、创建 ATA（开关逻辑复用 core）、转移代币入口跳转转账模块；操作均带确认流程。\n<info added on 2026-11-07T02:14:02.029Z>\n进度更新：已完成（部分简化）。发行表单支持 SPL/Token2022 程序选择、精度、初始供应量设置；扩展配置仅接入 transferFeeConfig 一项的 UI，core 支持的其余 Token2022 扩展暂未接入 UI。管理面板实现当前钱包资产列表展示，以及铸造增发与销毁操作。manage.ts 中已有的冻结/解冻账户、权限轮换（更新 mint/freeze authority）、元数据更新等能力暂未接入 UI，留待后续迭代补充。\n</info added on 2026-11-07T02:14:02.029Z>\n<info added on 2026-11-07T03:05:38.919Z>\n后续补充（用户要求）：此前简化限制已解除。Token2022ExtensionsPanel.tsx 新增全部 6 种 Token2022 扩展的 UI 配置（transferHook、interestBearingConfig、nonTransferable、permanentDelegate、tokenMetadata、defaultAccountState），支持可组合勾选，其中 permanentDelegate 配置附带风险提示横幅。TokenManagePage 补齐管理操作：冻结（freeze）与解冻（thaw）账户、设置 mint authority（setMintAuthority）与 freeze authority（setFreezeAuthority），永久撤销权限时需输入 REVOKE 进行二次确认，以及元数据更新（updateMetadata），操作均带确认流程。附带修复两项：signAndSendTokenTx 按统一约定改为返回 {error} 而非抛出异常；修复 create_token handler 此前未透传 result.error 导致静默吞错的 bug。\n</info added on 2026-11-07T03:05:38.919Z>",
             "status": "pending",
             "testStrategy": "mock Connection + 交易签名流程，断言表单校验（精度范围、费率上限）、发币二次确认拦截、Token2022 扩展参数正确传入 core 指令构造函数（spy 断言参数）",
             "parentId": "undefined"
@@ -934,7 +934,7 @@
         "updatedAt": "2026-11-07T02:14:13.473Z"
       },
       {
-        "id": "14",
+        "id": 14,
         "title": "端到端验收测试与测试补齐",
         "description": "确保 core 层单元测试覆盖钱包、金额换算、批量分片；补齐 CI 脚本；核对 MVP 验收标准1-4全部达成",
         "details": "补测试缺口：钱包边界（无效助记词、错误密码）、金额精度、分片算法、ATA 开关；package.json scripts：test/build/dev；验证 pnpm test 全绿；对照验收标准逐条检查 MCP 与 Web UI 流程、多签 2-of-3 流程",
@@ -1008,7 +1008,9 @@
       "completedCount": 14,
       "tags": [
         "master"
-      ]
+      ],
+      "created": "2026-11-07T03:05:28.164Z",
+      "description": "Tasks for master context"
     }
   }
 }
