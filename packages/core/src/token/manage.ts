@@ -114,7 +114,7 @@ export async function mintTokens(
   mint: string | PublicKey,
   destinationOwner: string | PublicKey,
   amount: bigint,
-  opts: SendTokenOptions & { decimals?: number } = {},
+  opts: SendTokenOptions = {},
 ): Promise<TokenManageResult> {
   assertPositiveAmount("mintTokens", amount);
   const mintKey = toPublicKey(mint);
@@ -143,7 +143,7 @@ export async function burnTokens(
   from: Keypair,
   mint: string | PublicKey,
   amount: bigint,
-  opts: SendTokenOptions & { decimals?: number } = {},
+  opts: SendTokenOptions = {},
 ): Promise<TokenManageResult> {
   assertPositiveAmount("burnTokens", amount);
   const mintKey = toPublicKey(mint);

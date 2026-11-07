@@ -10,6 +10,13 @@ import {
 import { useApp } from "../../lib/AppContext";
 import { Button, Card, Input, Label } from "../../components/ui";
 import { ResultView, type SimpleTxOutcome } from "../transfer/ResultView";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import {
+  Token2022ExtensionsPanel,
+  buildToken2022Extensions,
+  makeDefaultExtensionFormState,
+  type ExtensionFormState,
+} from "./Token2022ExtensionsPanel";
 
 type MintKind = "spl" | "token2022";
 
@@ -21,16 +28,17 @@ export function TokenCreatePage() {
   const [kind, setKind] = useState<MintKind>("spl");
   const [decimals, setDecimals] = useState("9");
   const [initialSupply, setInitialSupply] = useState("0");
-  const [enableTransferFee, setEnableTransferFee] = useState(false);
-  const [feeBps, setFeeBps] = useState("100");
-  const [maxFee, setMaxFee] = useState("1000000");
+  const [extForm, setExtForm] = useState<ExtensionFormState>(makeDefaultExtensionFormState());
   const [mainnetAck, setMainnetAck] = useState(false);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<(CreateTokenResult & { minted?: string }) | null>(null);
   const [outcome, setOutcome] = useState<SimpleTxOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
-  const create = async () => {
+  const { extensions, summary } = kind === "token2022" ? buildToken2022Extensions(extForm) : { extensions: undefined, summary: [] };
+
+  const doCreate = async () => {
     setError(null);
     setCreated(null);
     setOutcome(null);
@@ -48,17 +56,7 @@ export function TokenCreatePage() {
       const result =
         kind === "spl"
           ? await createSplToken(connection, keypair, opts)
-          : await createToken2022(connection, keypair, {
-              ...opts,
-              extensions: enableTransferFee
-                ? {
-                    transferFeeConfig: {
-                      transferFeeBasisPoints: Number(feeBps),
-                      maximumFee: BigInt(maxFee || "0"),
-                    },
-                  }
-                : undefined,
-            });
+          : await createToken2022(connection, keypair, { ...opts, extensions });
 
       let minted: string | undefined;
       const supply = parseAmount(initialSupply || "0", dec);
@@ -75,6 +73,14 @@ export function TokenCreatePage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const create = () => {
+    if (kind === "token2022" && summary.length > 0) {
+      setConfirming(true);
+      return;
+    }
+    void doCreate();
   };
 
   return (
@@ -99,26 +105,7 @@ export function TokenCreatePage() {
         </div>
       </div>
 
-      {kind === "token2022" && (
-        <div className="space-y-2 rounded-md border border-zinc-800 p-3">
-          <label className="flex items-center gap-2 text-sm text-zinc-300">
-            <input type="checkbox" checked={enableTransferFee} onChange={(e) => setEnableTransferFee(e.target.checked)} />
-            Enable transferFeeConfig extension
-          </label>
-          {enableTransferFee && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Fee (basis points, 100 = 1%)</Label>
-                <Input value={feeBps} onChange={(e) => setFeeBps(e.target.value)} />
-              </div>
-              <div>
-                <Label>Max fee (base units)</Label>
-                <Input value={maxFee} onChange={(e) => setMaxFee(e.target.value)} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {kind === "token2022" && <Token2022ExtensionsPanel state={extForm} onChange={setExtForm} />}
 
       {isMainnet && (
         <label className="flex items-center gap-2 text-sm text-amber-300">
@@ -130,6 +117,29 @@ export function TokenCreatePage() {
       <Button variant="primary" disabled={busy || !keypair} onClick={create}>
         {busy ? "Creating…" : "Create mint"}
       </Button>
+
+      {confirming && (
+        <ConfirmDialog
+          title="Confirm Token-2022 extensions"
+          description={
+            <div className="space-y-2">
+              <div>The following extensions will be baked into this mint (irreversible once created):</div>
+              <ul className="list-disc space-y-1 pl-5 text-xs text-zinc-300">
+                {summary.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ul>
+            </div>
+          }
+          confirmLabel="Create mint"
+          danger={false}
+          onConfirm={() => {
+            setConfirming(false);
+            void doCreate();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
 
       {outcome && (
         <div className="space-y-2">

@@ -11,7 +11,8 @@ import {
 } from "@solana/web3.js";
 
 import type { ClusterConnection, ConfirmPolicy } from "../connection/connection.js";
-import { SolwalletError } from "../connection/errors.js";
+import { SolwalletError, TransactionSendError } from "../connection/errors.js";
+import { parseTransactionError, type ParsedProgramError } from "../utils/parse-error.js";
 import { dryRun } from "../transfer/dryrun.js";
 import { getMintProgram } from "../transfer/program.js";
 
@@ -34,6 +35,8 @@ export interface TokenTxResult {
   /** Populated by dryRun: full simulation logs. */
   logs?: string[];
   unitsConsumed?: number;
+  /** Parsed failure — set instead of throwing, for AI-friendly flows. */
+  error?: ParsedProgramError;
 }
 
 /**
@@ -58,7 +61,7 @@ export async function signAndSendTokenTx(
 
   if (opts.dryRun) {
     const sim = await dryRun(conn, tx);
-    return {
+    const base: TokenTxResult = {
       signature: "",
       slot: 0,
       feeLamports: 0,
@@ -66,18 +69,37 @@ export async function signAndSendTokenTx(
       logs: sim.logs,
       unitsConsumed: sim.unitsConsumed,
     };
+    if (!sim.ok) {
+      const simErr = {
+        message: `Transaction simulation failed: ${JSON.stringify(sim.err)}`,
+        logs: sim.logs,
+      };
+      return { ...base, error: parseTransactionError(simErr) };
+    }
+    return base;
   }
 
-  const sent = await conn.sendWithRetry(tx, {
-    allowMainnet: opts.allowMainnet,
-    policy: opts.policy,
-  });
-  return {
-    signature: sent.signature,
-    slot: sent.slot,
-    feeLamports: sent.feeLamports,
-    simulatedOnly: false,
-  };
+  try {
+    const sent = await conn.sendWithRetry(tx, {
+      allowMainnet: opts.allowMainnet,
+      policy: opts.policy,
+    });
+    return {
+      signature: sent.signature,
+      slot: sent.slot,
+      feeLamports: sent.feeLamports,
+      simulatedOnly: false,
+    };
+  } catch (error) {
+    return {
+      signature:
+        error instanceof TransactionSendError ? (error.signature ?? "") : "",
+      slot: 0,
+      feeLamports: 0,
+      simulatedOnly: false,
+      error: parseTransactionError(error),
+    };
+  }
 }
 
 /** Resolve a mint and require it is owned by the Token-2022 program. */

@@ -6,6 +6,14 @@
 import {
   createSplToken,
   createToken2022,
+  mintTokens,
+  burnTokens,
+  setTransferFee,
+  freezeTokenAccount,
+  thawTokenAccount,
+  setMintAuthority,
+  setFreezeAuthority,
+  updateTokenMetadata,
   type Token2022ExtensionOptions,
 } from "@solwallet/core";
 import { PublicKey } from "@solana/web3.js";
@@ -135,6 +143,7 @@ export function registerTokenTools(
           feeLamports: result.feeLamports,
           simulatedOnly: result.simulatedOnly,
           logs: result.logs,
+          error: result.error,
         };
       }
 
@@ -148,6 +157,7 @@ export function registerTokenTools(
         feeLamports: result.feeLamports,
         simulatedOnly: result.simulatedOnly,
         logs: result.logs,
+        error: result.error,
       };
     }),
   );
@@ -213,7 +223,6 @@ export function registerTokenTools(
       switch (args.action) {
         case "mintTokens": {
           const amount = BigInt(str("amount", "base-unit integer string"));
-          const { mintTokens } = await import("@solwallet/core");
           return {
             action: args.action,
             ...(await mintTokens(conn, from, mint, str("destinationOwner", "recipient wallet address"), amount, opts)),
@@ -221,7 +230,6 @@ export function registerTokenTools(
         }
         case "burnTokens": {
           const amount = BigInt(str("amount", "base-unit integer string"));
-          const { burnTokens } = await import("@solwallet/core");
           return { action: args.action, ...(await burnTokens(conn, from, mint, amount, opts)) };
         }
         case "setTransferFee": {
@@ -229,7 +237,6 @@ export function registerTokenTools(
           if (typeof bps !== "number") {
             throw new Error("Missing params.transferFeeBasisPoints (integer 0–10000).");
           }
-          const { setTransferFee } = await import("@solwallet/core");
           return {
             action: args.action,
             effectiveNote: "New fee takes effect at the start of the next epoch (~2 days).",
@@ -244,8 +251,7 @@ export function registerTokenTools(
         }
         case "freezeAccount":
         case "thawAccount": {
-          const core = await import("@solwallet/core");
-          const fn = args.action === "freezeAccount" ? core.freezeTokenAccount : core.thawTokenAccount;
+          const fn = args.action === "freezeAccount" ? freezeTokenAccount : thawTokenAccount;
           const tokenAccountOwner =
             typeof p.tokenAccountOwner === "string" && p.tokenAccountOwner.length > 0
               ? p.tokenAccountOwner
@@ -254,8 +260,7 @@ export function registerTokenTools(
         }
         case "setMintAuthority":
         case "setFreezeAuthority": {
-          const core = await import("@solwallet/core");
-          const fn = args.action === "setMintAuthority" ? core.setMintAuthority : core.setFreezeAuthority;
+          const fn = args.action === "setMintAuthority" ? setMintAuthority : setFreezeAuthority;
           const raw = p.newAuthority;
           if (raw !== null && typeof raw !== "string") {
             throw new Error(
@@ -268,7 +273,6 @@ export function registerTokenTools(
           };
         }
         case "updateMetadata": {
-          const { updateTokenMetadata } = await import("@solwallet/core");
           return {
             action: args.action,
             ...(await updateTokenMetadata(
