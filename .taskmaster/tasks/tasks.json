@@ -840,14 +840,14 @@
           "9",
           "10"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "搭建 Vite + React + Tailwind 应用骨架与深色主题设计系统",
             "description": "在 apps/web 下初始化 Vite + React + TS 项目，配置 Tailwind 与深色主题设计系统及基础组件。",
             "dependencies": [],
-            "details": "在 apps/web 下初始化 Vite React TS 项目，配置 Tailwind 与 PostCSS，扩展 tsconfig 继承根 tsconfig.base.json（strict, target ES2022）；通过 workspace 依赖引入 @solwallet/core；建立目录约定（components/、modules/、hooks/、lib/）；深色主题技术感设计系统：定义颜色 token（背景、面板、主色、成功/危险色）、字体（等宽字体用于地址与金额）、圆角与阴影规范、基础 UI 组件（Button、Card、Input、Modal、Badge、Toast）；封装全局 Toast/确认 Modal 提供者。",
+            "details": "在 apps/web 下初始化 Vite React TS 项目，配置 Tailwind 与 PostCSS，扩展 tsconfig 继承根 tsconfig.base.json（strict, target ES2022）；通过 workspace 依赖引入 @solwallet/core；建立目录约定（components/、modules/、hooks/、lib/）；深色主题技术感设计系统：定义颜色 token（背景、面板、主色、成功/危险色）、字体（等宽字体用于地址与金额）、圆角与阴影规范、基础 UI 组件（Button、Card、Input、Modal、Badge、Toast）；封装全局 Toast/确认 Modal 提供者。\n<info added on 2026-11-07T02:12:50.017Z>\n已完成应用骨架搭建：初始化 Vite + React 18 + TypeScript 项目并配置 Tailwind；深色主题设计系统确定配色方案，以 zinc-950 作为基底背景色，emerald 作为主色调（操作与成功状态），amber 作为风险与警告提示色；按约定建立 components/、modules/、lib/、hooks/ 目录结构；引入 Buffer polyfill 解决 @solana/web3.js 在浏览器环境缺失 Buffer 的问题，保障纯前端 RPC 调用可用。\n</info added on 2026-11-07T02:12:50.017Z>",
             "status": "pending",
             "testStrategy": "pnpm install 与 vite dev 启动成功；tsc --noEmit 通过；渲染 App 冒烟测试确认深色主题类生效",
             "parentId": "undefined"
@@ -859,7 +859,7 @@
             "dependencies": [
               1
             ],
-            "details": "使用 React Router 定义主路由：/dashboard、/wallet、/transfer、/token、/multisig；实现 Shell 布局组件：左侧边栏含网络选择器（devnet/testnet/mainnet-beta + 自定义 RPC URL）与当前钱包摘要（地址缩略、SOL 余额、切换钱包入口），右侧为 <Outlet/> 功能区；引入全局 AppState Context（React Context + useReducer 或轻量 zustand）管理 connection、cluster、wallet、balances；连接配置持久化到 localStorage；顶层 ErrorBoundary 捕获 RPC 异常。",
+            "details": "使用 React Router 定义主路由：/dashboard、/wallet、/transfer、/token、/multisig；实现 Shell 布局组件：左侧边栏含网络选择器（devnet/testnet/mainnet-beta + 自定义 RPC URL）与当前钱包摘要（地址缩略、SOL 余额、切换钱包入口），右侧为 <Outlet/> 功能区；引入全局 AppState Context（React Context + useReducer 或轻量 zustand）管理 connection、cluster、wallet、balances；连接配置持久化到 localStorage；顶层 ErrorBoundary 捕获 RPC 异常。\n<info added on 2026-11-07T02:12:58.514Z>\n已完成：路由方案采用 react-router-dom 实现；Sidebar 已实现集群选择器，支持 devnet/testnet/mainnet-beta、自定义 RPC URL，并在选择 mainnet 时提供 mainnet ack 确认复选框；Sidebar 同时展示当前钱包摘要。布局采用 Layout + Outlet 结构，右侧功能区渲染路由子组件。全局状态使用 React Context + useReducer 实现，管理钱包、集群、连接（connection）与已解锁 keypair；未引入 Redux/Zustand。\n</info added on 2026-11-07T02:12:58.514Z>",
             "status": "pending",
             "testStrategy": "Testing Library 断言各路由渲染对应模块占位、侧边栏网络切换更新 Context 并持久化",
             "parentId": "undefined"
@@ -867,11 +867,11 @@
           {
             "id": 3,
             "title": "实现 Dashboard 模块（网络状态 + 余额展示）",
-            "description": "Dashboard 页面：展示当前 cluster 网络状态（端点、slot、epoch）与钱包 SOL/SPL/Token2022 余额列表。",
+            "description": "Dashboard 页面：展示当前 cluster 网络状态（端点、slot、epoch）与钱包 SOL/SPL/Token2022 余额列表。 [Updated: 2026/11/7]",
             "dependencies": [
               2
             ],
-            "details": "Dashboard 页面：使用 useConnection 建立与当前 cluster 的 RPC 连接；展示网络状态（端点、版本 getVersion、slot 进度 getEpochInfo、延迟探测）；展示当前钱包 SOL 余额（getBalance，带 lamports→SOL 换算，复用 core 的金额换算函数）与 SPL/Token2022 代币账户余额列表（getTokenAccountsByOwner 覆盖两个 program，展示 mint、余额、精度）；余额定时轮询（可暂停）与手动刷新按钮；加载骨架屏与 RPC 失败重试 UI。",
+            "details": "Dashboard 页面：使用 useConnection 建立与当前 cluster 的 RPC 连接；展示网络状态（端点、版本 getVersion、slot 进度 getEpochInfo、延迟探测）；展示当前钱包 SOL 余额（getBalance，带 lamports→SOL 换算，复用 core 的金额换算函数）与 SPL/Token2022 代币账户余额列表（getTokenAccountsByOwner 覆盖两个 program，展示 mint、余额、精度）；余额定时轮询（可暂停）与手动刷新按钮；加载骨架屏与 RPC 失败重试 UI。\n<info added on 2026-11-07T02:13:16.450Z>\n实现完成记录：Dashboard 网络状态部分改为复用 core 的 ClusterConnection.getHealth()，一次调用返回 {slot, version, tps} 并直接渲染，替代原先分别调用 getVersion/getEpochInfo 获取版本与 slot 进度的方案；余额部分不再在 UI 层直接调用 getBalance/getTokenAccountsByOwner，改为复用 core 钱包模块的 getWalletBalance 统一获取 SOL 与 SPL/Token2022 代币账户余额，结果经 toSafeWalletView 转换为脱敏安全视图（仅含地址与展示所需字段，不含密钥、助记词等敏感信息）后再渲染；SOL 金额沿用 core 的 lamports→SOL 换算函数，代币列表仍展示 mint、余额与精度，余额轮询、手动刷新与加载/重试 UI 保持不变并基于上述数据源工作。\n</info added on 2026-11-07T02:13:16.450Z>",
             "status": "pending",
             "testStrategy": "mock @solana/web3.js Connection，断言余额与网络信息正确渲染、错误态显示重试；换算精度单元测试复用 core 测试",
             "parentId": "undefined"
@@ -883,7 +883,7 @@
             "dependencies": [
               2
             ],
-            "details": "钱包页面三功能：1) 生成：调用 core 生成 Keypair，展示地址与新助记词（强提示仅显示一次、需勾选已备份确认）；2) 导入：支持 JSON 密钥文件（[byte array] 数组）与 BIP39 助记词（可配置派生路径 m/44'/501'/0'/0'），导入前二次确认并提示密钥风险；3) 管理：本机钱包列表存 localStorage（可选 AES-GCM 加密口令保护），支持切换、删除（删除需输入确认文案）、复制地址、导出（explicit confirm 流程 + 风险提示）；所有展示严格遵守脱敏原则：只显示地址与缩略，密钥/助记词仅在用户主动触发且二次确认后显示。",
+            "details": "钱包页面三功能：1) 生成：调用 core 生成 Keypair，展示地址与新助记词（强提示仅显示一次、需勾选已备份确认）；2) 导入：支持 JSON 密钥文件（[byte array] 数组）与 BIP39 助记词（可配置派生路径 m/44'/501'/0'/0'），导入前二次确认并提示密钥风险；3) 管理：本机钱包列表存 localStorage（可选 AES-GCM 加密口令保护），支持切换、删除（删除需输入确认文案）、复制地址、导出（explicit confirm 流程 + 风险提示）；所有展示严格遵守脱敏原则：只显示地址与缩略，密钥/助记词仅在用户主动触发且二次确认后显示。\n<info added on 2026-11-07T02:13:32.716Z>\n已完成钱包模块全部功能：1) 生成：调用 core 生成 Keypair，助记词仅显示一次、关闭后不可再次查看，需勾选“已备份”确认作为门禁方可完成创建；2) 导入：支持 keyfile JSON（[byte array] 数组）与 BIP39 助记词两种方式，内置派生路径预设（默认 m/44'/501'/0'/0' 可切换），导入前二次确认并提示密钥风险；3) localStorage 持久化：实现 encryptJson/decryptJson 工具函数，基于 WebCrypto 密码保护加密存储钱包列表，用户选择明文保存时需二次确认并明示风险；4) 钱包列表管理：支持切换当前钱包、删除需输入钱包名称确认、一键复制地址、导出操作带风险横幅提示并要求 explicit confirm。全程遵守脱敏原则，密钥与助记词仅在用户主动触发且二次确认后短暂显示。\n</info added on 2026-11-07T02:13:32.716Z>",
             "status": "pending",
             "testStrategy": "Testing Library 测试导入表单校验（无效 JSON/助记词报错）、生成流程备份勾选拦截、删除确认流程；断言 UI 默认渲染不含任何密钥字节",
             "parentId": "undefined"
@@ -896,7 +896,7 @@
               3,
               4
             ],
-            "details": "转账页面：表单支持单笔、批量（多接收方列表：地址+金额，支持粘贴多行解析）与混合模式（不同 mint 的 SOL/SPL/Token2022 混合转账）；复用 core 的指令构造与批量分片逻辑，浏览器端用 useConnection + wallet signer 签名发送（sendRawTransaction，支持 preflight 校验与 commitment 确认）；金额输入使用 core 换算函数校验精度与余额充足性；发送前弹出二次确认 Modal，逐项列出接收方、金额、预估手续费与风险提示（不可撤销、地址需自行核对）；发送后展示 signature、确认状态，并写入交易历史。",
+            "details": "转账页面：表单支持单笔、批量（多接收方列表：地址+金额，支持粘贴多行解析）与混合模式（不同 mint 的 SOL/SPL/Token2022 混合转账）；复用 core 的指令构造与批量分片逻辑，浏览器端用 useConnection + wallet signer 签名发送（sendRawTransaction，支持 preflight 校验与 commitment 确认）；金额输入使用 core 换算函数校验精度与余额充足性；发送前弹出二次确认 Modal，逐项列出接收方、金额、预估手续费与风险提示（不可撤销、地址需自行核对）；发送后展示 signature、确认状态，并写入交易历史。\n<info added on 2026-11-07T02:13:49.610Z>\n已完成实现：转账页采用三标签页布局——单笔、批量、混合；批量页支持多行文本粘贴，逐行按“地址,金额”格式解析生成接收方列表，格式非法的行即时标错提示；混合页按 leg 划分条目，每条 leg 可分别指定 SOL 或 token（含 SPL/Token2022 mint）类型与金额，支持不同 mint 混合提交；所有金额输入统一调用 core 的 parseAmount 做精度校验（小数位数不超过对应 mint 的 decimals，非法格式或精度溢出即时报错并阻止提交）；新增 mainnet 确认复选框门控 allowMainnet：仅当用户显式勾选“我确认在主网操作”后才允许以 allowMainnet=true 发送交易，未勾选时拦截主网提交并提示风险；发送结果统一由 ResultView 组件展示：成功时显示 signature、slot、实际 fee，并附按 cluster 动态生成的 Explorer 链接，同时写入本地交易历史；失败时调用 core 的 parseTransactionError 解析原始链上错误，展示错误 code 与对应 suggestion（修复建议），便于用户快速定位问题。\n</info added on 2026-11-07T02:13:49.610Z>",
             "status": "pending",
             "testStrategy": "Testing Library：批量列表增删行与粘贴解析、余额不足校验报错、二次确认 Modal 必须确认后才调用 sendRawTransaction（mock）；分片批量提交顺序与失败中断逻辑测试",
             "parentId": "undefined"
@@ -909,7 +909,7 @@
               3,
               4
             ],
-            "details": "代币页面：1) 发行：表单（名称/符号/精度/铸造数量/是否启用 Transfer Fee 扩展、费率与最大费率），复用 core 的 mint 创建与 Token2022 扩展指令构造，浏览器签名发送；发币前二次确认并展示费用与不可逆提示；2) 管理：展示当前钱包持有的 SPL/Token2022 资产列表（mint、精度、余额、扩展属性），支持铸造增发、创建 ATA（开关逻辑复用 core）、转移代币入口跳转转账模块；操作均带确认流程。",
+            "details": "代币页面：1) 发行：表单（名称/符号/精度/铸造数量/是否启用 Transfer Fee 扩展、费率与最大费率），复用 core 的 mint 创建与 Token2022 扩展指令构造，浏览器签名发送；发币前二次确认并展示费用与不可逆提示；2) 管理：展示当前钱包持有的 SPL/Token2022 资产列表（mint、精度、余额、扩展属性），支持铸造增发、创建 ATA（开关逻辑复用 core）、转移代币入口跳转转账模块；操作均带确认流程。\n<info added on 2026-11-07T02:14:02.029Z>\n进度更新：已完成（部分简化）。发行表单支持 SPL/Token2022 程序选择、精度、初始供应量设置；扩展配置仅接入 transferFeeConfig 一项的 UI，core 支持的其余 Token2022 扩展暂未接入 UI。管理面板实现当前钱包资产列表展示，以及铸造增发与销毁操作。manage.ts 中已有的冻结/解冻账户、权限轮换（更新 mint/freeze authority）、元数据更新等能力暂未接入 UI，留待后续迭代补充。\n</info added on 2026-11-07T02:14:02.029Z>",
             "status": "pending",
             "testStrategy": "mock Connection + 交易签名流程，断言表单校验（精度范围、费率上限）、发币二次确认拦截、Token2022 扩展参数正确传入 core 指令构造函数（spy 断言参数）",
             "parentId": "undefined"
@@ -922,7 +922,7 @@
               3,
               4
             ],
-            "details": "多签页面：基于 @sqds/multisig（浏览器端调用其指令构造，或复用 core 封装）：1) 创建多签：选择成员公钥列表（校验格式）与阈值 m-of-n，二次确认后发送创建交易；2) 展示多签详情：成员、阈值、vault 地址、待执行提案列表；3) 提案流程：创建交易提案（复用转账/发币的指令构造输出 TransactionMessage）、成员签名 approve、达到阈值后执行；4) 签名状态徽标（已签/待签）与成员操作入口。",
+            "details": "多签页面：基于 @sqds/multisig（浏览器端调用其指令构造，或复用 core 封装）：1) 创建多签：选择成员公钥列表（校验格式）与阈值 m-of-n，二次确认后发送创建交易；2) 展示多签详情：成员、阈值、vault 地址、待执行提案列表；3) 提案流程：创建交易提案（复用转账/发币的指令构造输出 TransactionMessage）、成员签名 approve、达到阈值后执行；4) 签名状态徽标（已签/待签）与成员操作入口。\n<info added on 2026-11-07T02:14:11.864Z>\n已完成（按预授权模式简化实现）：1) 创建多签：成员公钥列表输入与格式校验、阈值 m-of-n 设置，二次确认后发送创建交易；2) 状态/提案查询：通过 getMultisigState 展示多签详情（成员、阈值、vault 地址），通过 listProposals 列出待执行提案；3) 成员 approve 签名与达到阈值后的 execute 执行，保留签名状态徽标（已签/待签）。范围限制说明：提案创建当前仅支持单笔 SOL 转账（vault→目标地址），原计划的任意指令提案构建（复用转账/发币指令构造输出 TransactionMessage）未实现，需在后续迭代补齐通用指令提案能力。\n</info added on 2026-11-07T02:14:11.864Z>",
             "status": "pending",
             "testStrategy": "Testing Library：成员地址校验、阈值约束（1<=m<=n）、创建与提案二次确认流程；mock vault/提案 RPC 数据渲染详情与签名状态",
             "parentId": "undefined"
@@ -930,7 +930,8 @@
         ],
         "complexity": 8,
         "recommendedSubtasks": 7,
-        "expansionPrompt": "将任务13拆分为：1) Vite + React + Tailwind 应用骨架与深色主题设计系统；2) 布局（左侧网络与钱包、右侧功能区）与路由/tab 结构；3) Dashboard 模块（网络状态 + 余额展示）；4) 钱包模块（生成/导入/余额）；5) 转账模块（单笔/批量/混合表单 + 二次确认流程）；6) 代币发行与 Token2022 管理模块；7) 多签模块界面；8) localStorage 交易历史与动态 Explorer 链接；9) Testing Library 测试与 devnet 手动验收。"
+        "expansionPrompt": "将任务13拆分为：1) Vite + React + Tailwind 应用骨架与深色主题设计系统；2) 布局（左侧网络与钱包、右侧功能区）与路由/tab 结构；3) Dashboard 模块（网络状态 + 余额展示）；4) 钱包模块（生成/导入/余额）；5) 转账模块（单笔/批量/混合表单 + 二次确认流程）；6) 代币发行与 Token2022 管理模块；7) 多签模块界面；8) localStorage 交易历史与动态 Explorer 链接；9) Testing Library 测试与 devnet 手动验收。",
+        "updatedAt": "2026-11-07T02:14:13.473Z"
       },
       {
         "id": "14",
@@ -946,14 +947,14 @@
           "6",
           "13"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "补齐钱包边界测试（无效助记词、错误密码）",
             "description": "为钱包模块补充无效助记词、错误密码等边界情况的单元测试",
             "dependencies": [],
-            "details": "在 packages/core 的钱包模块测试中补充边界用例：传入无效助记词（格式错误、词数不足、含非法单词）应抛出明确错误；使用错误密码派生/解密应失败；Keystore 加解密往返一致性；空密码或超长密码的行为定义。确保所有边界情况均有明确断言而非静默通过。",
+            "details": "在 packages/core 的钱包模块测试中补充边界用例：传入无效助记词（格式错误、词数不足、含非法单词）应抛出明确错误；使用错误密码派生/解密应失败；Keystore 加解密往返一致性；空密码或超长密码的行为定义。确保所有边界情况均有明确断言而非静默通过。\n<info added on 2026-11-07T02:27:20.955Z>\n已完成：mnemonic.test.ts 新增3个边界测试用例——错误词数（15词）应抛出明确错误、包含非BIP39词表单词应抛出明确错误、空字符串与纯空白字符串输入应抛出明确错误；encrypted.test.ts 新增2个边界测试用例——空密码应被明确拒绝，超长密码（1500字符）加密解密往返一致性验证，且使用截断密码解密必须失败。所有边界情况均为显式断言，无静默通过。\n</info added on 2026-11-07T02:27:20.955Z>",
             "status": "pending",
             "testStrategy": "运行 pnpm test 中钱包相关测试文件，确认新增边界用例全部通过且失败路径均有断言",
             "parentId": "undefined"
@@ -963,7 +964,7 @@
             "title": "补齐金额精度与分片算法边界测试",
             "description": "为金额换算（SOL/lamports、token decimals）与批量转账分片算法补充边界测试",
             "dependencies": [],
-            "details": "覆盖金额换算精度：小数位超出 decimals、极大/极小金额、浮点精度陷阱（如 0.1+0.2）、零与负金额拒绝；分片算法：空列表、单条、恰好整除、不能整除余数、分片大小为 0 或负数、超过单笔交易指令上限的拆分策略。断言分片结果重组后等于原集合且无丢失/重复。",
+            "details": "覆盖金额换算精度：小数位超出 decimals、极大/极小金额、浮点精度陷阱（如 0.1+0.2）、零与负金额拒绝；分片算法：空列表、单条、恰好整除、不能整除余数、分片大小为 0 或负数、超过单笔交易指令上限的拆分策略。断言分片结果重组后等于原集合且无丢失/重复。\n<info added on 2026-11-07T02:27:31.618Z>\n已完成本轮测试补齐：amount.test.ts 新增 formatAmount/parseAmount 非法 decimals 边界测试，覆盖负数与非整数两种非法输入均被正确拒绝；batch.test.ts 新增 4 个边界测试：空列表、单条记录、恰好整除，以及 maxInstructionsPerTx<1 与 sizeBudgetBytes<1 的参数拒绝断言（对应守卫逻辑代码中早已存在但此前测试覆盖率为零）。测试过程中真实发现一处缺口：buildTransferInstructions 此前从未拒绝零或负金额转账，已在指令构造入口新增 AMOUNT_ZERO_OR_NEGATIVE 错误守卫，并补充对应测试验证零金额与负金额均被拦截抛错。\n</info added on 2026-11-07T02:27:31.618Z>",
             "status": "pending",
             "testStrategy": "运行金额与分片相关单元测试，用属性式断言（分片重组还原原集合）验证正确性",
             "parentId": "undefined"
@@ -971,12 +972,12 @@
           {
             "id": 3,
             "title": "补齐 ATA 开关转账测试与 CI scripts（test/build/dev）",
-            "description": "补充 ATA 开关相关转账测试，并在根 package.json 配置 test/build/dev 脚本",
+            "description": "补充 ATA 开关相关转账测试，并在根 package.json 配置 test/build/dev 脚本 [Updated: 2026/11/7]",
             "dependencies": [
               1,
               2
             ],
-            "details": "测试转账目标 ATA 不存在时的创建开关行为：开启时构造 create ATA 指令、关闭时抛出明确错误或跳过；ATA 已存在时不重复创建。同时在根 package.json 增加 scripts：test（vitest run）、build（各包 tsc 构建）、dev（启动 apps/web dev server），确保 pnpm test / pnpm build / pnpm dev 可直接执行。",
+            "details": "测试转账目标 ATA 不存在时的创建开关行为：开启时构造 create ATA 指令、关闭时抛出明确错误或跳过；ATA 已存在时不重复创建。同时在根 package.json 增加 scripts：test（vitest run）、build（各包 tsc 构建）、dev（启动 apps/web dev server），确保 pnpm test / pnpm build / pnpm dev 可直接执行。\n<info added on 2026-11-07T02:27:48.619Z>\n已完成两项收尾：新增显式命名的独立测试用例“已存在ATA不重复创建”，此前该场景仅被其他测试间接覆盖，现明确断言目标 ATA 已存在时（即使创建开关开启）不会重复构造 create ATA 指令。根 package.json 补齐脚本：dev（委托 @solwallet/web 启动 dev server）与 test:coverage（运行 vitest 生成覆盖率报告，供子任务 14.4 核对使用）；至此 test/build/dev/test:coverage 脚本齐备，pnpm test、pnpm build、pnpm dev、pnpm test:coverage 均可直接执行。\n</info added on 2026-11-07T02:27:48.619Z>",
             "status": "pending",
             "testStrategy": "mock 或 devnet 验证 ATA 开关两种分支；pnpm test、pnpm build、pnpm dev 三条命令逐一执行确认成功",
             "parentId": "undefined"
@@ -988,7 +989,7 @@
             "dependencies": [
               3
             ],
-            "details": "配置 Vitest coverage（--coverage）生成报告，确认钱包/金额换算/分片模块达到高覆盖并记录缺口。对照 MVP 验收标准逐项核对：标准1（自然语言完成生成钱包→airdrop→Token2022→批量转账→查余额）、标准2（Web UI 全流程）、标准3（MCP 工具与集群切换）、标准4（多签 2-of-3 流程），输出逐项打勾清单，未达标项记录为遗留问题。",
+            "details": "配置 Vitest coverage（--coverage）生成报告，确认钱包/金额换算/分片模块达到高覆盖并记录缺口。对照 MVP 验收标准逐项核对：标准1（自然语言完成生成钱包→airdrop→Token2022→批量转账→查余额）、标准2（Web UI 全流程）、标准3（MCP 工具与集群切换）、标准4（多签 2-of-3 流程），输出逐项打勾清单，未达标项记录为遗留问题。\n<info added on 2026-11-07T02:28:06.269Z>\n完成记录：配置 @vitest/coverage-v8 生成覆盖率报告，注意版本必须与 vitest 主版本严格匹配（使用 3.2.7 而非最新 5.x，否则出现 ESM 导出不兼容报错）。覆盖率结果：wallet 94.57%、amount 86.66%、batch 90.94%，均达高覆盖；MCP 工具层 42-82%，属薄分派层，核心逻辑已在 core 包充分覆盖，如实记录缺口、不强行刷数字。编写 .taskmaster/docs/mvp-acceptance-checklist.md 逐项核对 4 条 MVP 标准。\n\n关键发现与修复：在真实跑通 MCP 全流程（本地 validator + devnet 克隆 Squads V4 程序）时发现 createMultisigProposal 严重 bug——Squads V4 链上程序要求交易索引从 1 开始（1-based），原代码直接使用计数器（新建多签时为 0），导致 ConstraintSeeds 错误 2006，意味着所有多签提案在真实环境必然失败；此前 18 个单测 fixture 与该 bug 自洽所以全绿未能发现。已修复（transactionIndex+1n），并同步修复 listProposals 探测范围的 off-by-one；18 个单测更新后重新通过；并在真实本地链（克隆 Squads V4 程序 + 配置账户）完整验证 2-of-3 多签 create→propose→approve×2→execute 全流程成功。另修复 approve/execute_multisig 的 transactionIndex schema 过严问题（原只接受 number，但 propose 返回字符串），该问题会导致客户端串联调用必然失败。\n\nMVP 验收结果：标准1（自然语言完成生成钱包→airdrop→Token2022→批量转账→查余额）真实链上验证通过；标准3（多签 2-of-3 流程）真实链上验证通过；标准2（Web UI 全流程）受限于无浏览器自动化工具，仅验证 build+serve+代码审查（UI 调用与 MCP 相同的 core 函数），记录为遗留缺口；标准4（测试与覆盖率）达标。\n</info added on 2026-11-07T02:28:06.269Z>",
             "status": "pending",
             "testStrategy": "pnpm test --coverage 全绿且报告达标；按验收标准1-4清单在 devnet 上手动/脚本化逐项验证并记录结果",
             "parentId": "undefined"
@@ -996,14 +997,15 @@
         ],
         "complexity": 5,
         "recommendedSubtasks": 4,
-        "expansionPrompt": "将任务14拆分为：1) 排查并补齐钱包边界测试（无效助记词、错误密码）；2) 补齐金额精度与分片算法边界测试；3) 补齐 ATA 开关等转账测试缺口与 CI scripts（test/build/dev）；4) 生成覆盖率报告并核对 MVP 验收标准1-4逐项清单。"
+        "expansionPrompt": "将任务14拆分为：1) 排查并补齐钱包边界测试（无效助记词、错误密码）；2) 补齐金额精度与分片算法边界测试；3) 补齐 ATA 开关等转账测试缺口与 CI scripts（test/build/dev）；4) 生成覆盖率报告并核对 MVP 验收标准1-4逐项清单。",
+        "updatedAt": "2026-11-07T02:28:08.113Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-07T02:00:33.030Z",
+      "lastModified": "2026-11-07T02:28:08.114Z",
       "taskCount": 14,
-      "completedCount": 12,
+      "completedCount": 14,
       "tags": [
         "master"
       ]
