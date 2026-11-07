@@ -1,6 +1,7 @@
 import {
   Keypair,
   PublicKey,
+  SystemProgram,
   VersionedTransaction,
   type Connection,
 } from "@solana/web3.js";
@@ -18,14 +19,19 @@ import { ClusterConnection } from "../connection/connection.js";
 import {
   BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
   CPI_BATCH_TRANSFER_DISCRIMINANT,
+  CPI_INITIALIZE_VAULT_DATA_BYTES,
+  CPI_INITIALIZE_VAULT_DISCRIMINANT,
   CPI_ITEM_BYTES,
   DEFAULT_DEPLOY_CHUNK_BYTES,
   buildCpiBatchTransferInstruction,
+  buildCpiInitializeVaultInstruction,
   deployCpiProgram,
   executeCpiBatchTransfer,
   findCpiVaultPda,
   findProgramDataAddress,
+  initializeCpiVault,
   serializeCpiBatchTransferData,
+  serializeCpiInitializeVaultData,
 } from "./cpi.js";
 
 // Decoded v0 instruction `data` is a plain Uint8Array (no Buffer methods) —
@@ -46,6 +52,9 @@ function fakeConn(cluster: "devnet" | "mainnet-beta" = "devnet") {
     sendRawTransaction: vi.fn().mockImplementation((_raw: Buffer) => {
       sentTransactions.push(_raw);
       return Promise.resolve(`SIG_${sentTransactions.length}`);
+    }),
+    simulateTransaction: vi.fn().mockResolvedValue({
+      value: { err: null, logs: ["Program log: Simulated ok"], unitsConsumed: 4242 },
     }),
     confirmTransaction: vi
       .fn()
@@ -143,26 +152,62 @@ describe("findCpiVaultPda", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildCpiBatchTransferInstruction", () => {
-  it("lays out accounts [authority(signer), vault, recipients…] and data", () => {
+  it("lays out accounts [authority(signer), vault, systemProgram, recipients…] and data", () => {
     const vault = findCpiVaultPda(programId).vault;
     const ix = buildCpiBatchTransferInstruction(programId, authority.publicKey, [
       { to: r1, lamports: 5n },
       { to: r2, lamports: 6n },
     ]);
     expect(ix.programId.equals(programId)).toBe(true);
-    expect(ix.keys).toHaveLength(4);
+    expect(ix.keys).toHaveLength(5);
     expect(ix.keys[0]).toMatchObject({
       pubkey: authority.publicKey,
       isSigner: true,
       isWritable: true,
     });
     expect(ix.keys[1]).toMatchObject({ pubkey: vault, isSigner: false, isWritable: true });
-    expect(ix.keys[2]).toMatchObject({ pubkey: r1, isSigner: false, isWritable: true });
-    expect(ix.keys[3]).toMatchObject({ pubkey: r2, isSigner: false, isWritable: true });
+    expect(ix.keys[2]).toMatchObject({
+      pubkey: SystemProgram.programId,
+      isSigner: false,
+      isWritable: false,
+    });
+    expect(ix.keys[3]).toMatchObject({ pubkey: r1, isSigner: false, isWritable: true });
+    expect(ix.keys[4]).toMatchObject({ pubkey: r2, isSigner: false, isWritable: true });
     expect(ix.data.equals(serializeCpiBatchTransferData([
       { to: r1, lamports: 5n },
       { to: r2, lamports: 6n },
     ]))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initialize_vault serialization + instruction construction
+// ---------------------------------------------------------------------------
+
+describe("serializeCpiInitializeVaultData", () => {
+  it("produces the exact documented binary layout", () => {
+    const data = serializeCpiInitializeVaultData(authority.publicKey);
+    expect(data.length).toBe(CPI_INITIALIZE_VAULT_DATA_BYTES);
+    expect(data.readUInt8(0)).toBe(CPI_INITIALIZE_VAULT_DISCRIMINANT);
+    expect(data.subarray(1, 33).equals(authority.publicKey.toBytes())).toBe(true);
+  });
+});
+
+describe("buildCpiInitializeVaultInstruction", () => {
+  it("lays out accounts [payer(signer), vault, systemProgram] and data", () => {
+    const vault = findCpiVaultPda(programId).vault;
+    const payer = Keypair.generate().publicKey;
+    const ix = buildCpiInitializeVaultInstruction(programId, payer, authority.publicKey);
+    expect(ix.programId.equals(programId)).toBe(true);
+    expect(ix.keys).toHaveLength(3);
+    expect(ix.keys[0]).toMatchObject({ pubkey: payer, isSigner: true, isWritable: true });
+    expect(ix.keys[1]).toMatchObject({ pubkey: vault, isSigner: false, isWritable: true });
+    expect(ix.keys[2]).toMatchObject({
+      pubkey: SystemProgram.programId,
+      isSigner: false,
+      isWritable: false,
+    });
+    expect(ix.data.equals(serializeCpiInitializeVaultData(authority.publicKey))).toBe(true);
   });
 });
 
@@ -189,16 +234,125 @@ describe("executeCpiBatchTransfer", () => {
     expect(result.vault).toBe(findCpiVaultPda(programId).vault.toBase58());
     expect(result.recipientCount).toBe(2);
     expect(result.totalLamports).toBe(3n);
+    expect(result.simulatedOnly).toBe(false);
+    expect(result.error).toBeUndefined();
     expect(fake.sendRawTransaction).toHaveBeenCalledOnce();
 
-    // The single sent transaction carries exactly our CPI instruction.
+    // The single sent transaction carries exactly our CPI instruction. The
+    // compiler re-sorts static account keys by (signer, writable) grouping,
+    // so verify logical account order via the compiled instruction's own
+    // accountKeyIndexes (matching our `keys` array order) rather than raw
+    // staticAccountKeys positions.
     const [tx] = sentMessages(sentTransactions);
     const compiled = tx.message.compiledInstructions;
     expect(compiled).toHaveLength(1);
-    expect(tx.message.staticAccountKeys[compiled[0]!.programIdIndex].equals(programId)).toBe(true);
-    // account keys start with payer + vault + both recipients
-    expect(tx.message.staticAccountKeys[0].equals(authority.publicKey)).toBe(true);
-    expect(tx.message.staticAccountKeys[1].equals(findCpiVaultPda(programId).vault)).toBe(true);
+    const ix = compiled[0]!;
+    const resolved = ix.accountKeyIndexes.map((i) => tx.message.staticAccountKeys[i]!);
+    expect(tx.message.staticAccountKeys[ix.programIdIndex].equals(programId)).toBe(true);
+    // account keys: payer, vault, system program, then both recipients
+    expect(resolved[0]!.equals(authority.publicKey)).toBe(true);
+    expect(resolved[1]!.equals(findCpiVaultPda(programId).vault)).toBe(true);
+    expect(resolved[2]!.equals(SystemProgram.programId)).toBe(true);
+    expect(resolved[3]!.equals(r1)).toBe(true);
+    expect(resolved[4]!.equals(r2)).toBe(true);
+  });
+
+  it("dry-run simulates instead of sending and reports logs", async () => {
+    const { conn, fake } = fakeConn();
+    const result = await executeCpiBatchTransfer(
+      conn,
+      authority,
+      programId,
+      [{ to: r1, lamports: 1n }],
+      { dryRun: true },
+    );
+    expect(result.simulatedOnly).toBe(true);
+    expect(result.signature).toBe("");
+    expect(result.logs).toEqual(["Program log: Simulated ok"]);
+    expect(result.unitsConsumed).toBe(4242);
+    expect(result.error).toBeUndefined();
+    expect(fake.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it("dry-run returns a parsed error when simulation fails", async () => {
+    const { conn, fake } = fakeConn();
+    fake.simulateTransaction.mockResolvedValueOnce({
+      value: { err: { InstructionError: [0, { Custom: 5 }] }, logs: ["Program log: unauthorized"] },
+    });
+    const result = await executeCpiBatchTransfer(
+      conn,
+      authority,
+      programId,
+      [{ to: r1, lamports: 1n }],
+      { dryRun: true },
+    );
+    expect(result.simulatedOnly).toBe(true);
+    expect(result.error).toBeDefined();
+    expect(result.error?.code).toBe("SIMULATION_FAILED");
+  });
+
+  it("send failure returns a parsed error instead of throwing", async () => {
+    const { conn, fake } = fakeConn();
+    fake.sendRawTransaction.mockRejectedValueOnce(
+      new Error("Error: insufficient funds for rent"),
+    );
+    const result = await executeCpiBatchTransfer(
+      conn,
+      authority,
+      programId,
+      [{ to: r1, lamports: 1n }],
+      { policy: { retries: 1 } },
+    );
+    expect(result.signature).toBe("");
+    expect(result.simulatedOnly).toBe(false);
+    expect(result.error?.code).toBe("INSUFFICIENT_FUNDS");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initializeCpiVault orchestration (fake connection, no real chain)
+// ---------------------------------------------------------------------------
+
+describe("initializeCpiVault", () => {
+  it("derives the vault, sends one transaction, reports signature/slot/fee", async () => {
+    const { conn, fake, sentTransactions } = fakeConn();
+    const payer = Keypair.generate();
+    const result = await initializeCpiVault(
+      conn,
+      payer,
+      programId,
+      authority.publicKey,
+      { policy: { retries: 1 } },
+    );
+    expect(result.signature).toBe("SIG_1");
+    expect(result.slot).toBe(42);
+    expect(result.feeLamports).toBe(5000);
+    expect(result.vault).toBe(findCpiVaultPda(programId).vault.toBase58());
+    expect(result.authority).toBe(authority.publicKey.toBase58());
+    expect(result.simulatedOnly).toBe(false);
+    expect(fake.sendRawTransaction).toHaveBeenCalledOnce();
+
+    const [tx] = sentMessages(sentTransactions);
+    const compiled = tx.message.compiledInstructions;
+    expect(compiled).toHaveLength(1);
+    const ix = compiled[0]!;
+    const resolved = ix.accountKeyIndexes.map((i) => tx.message.staticAccountKeys[i]!);
+    expect(tx.message.staticAccountKeys[ix.programIdIndex].equals(programId)).toBe(true);
+    expect(resolved[0]!.equals(payer.publicKey)).toBe(true);
+    expect(resolved[1]!.equals(findCpiVaultPda(programId).vault)).toBe(true);
+    expect(resolved[2]!.equals(SystemProgram.programId)).toBe(true);
+  });
+
+  it("dry-run simulates instead of sending", async () => {
+    const { conn, fake } = fakeConn();
+    const payer = Keypair.generate();
+    const result = await initializeCpiVault(conn, payer, programId, authority.publicKey, {
+      dryRun: true,
+    });
+    expect(result.simulatedOnly).toBe(true);
+    expect(result.signature).toBe("");
+    expect(result.logs).toEqual(["Program log: Simulated ok"]);
+    expect(fake.sendRawTransaction).not.toHaveBeenCalled();
   });
 });
 

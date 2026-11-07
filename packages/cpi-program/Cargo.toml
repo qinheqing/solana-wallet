@@ -2,7 +2,7 @@
 name = "solwallet-cpi"
 version = "0.1.0"
 edition = "2021"
-description = "Minimal Solana BPF program (pinocchio): batch SOL transfers from a PDA vault via System Program CPI"
+description = "Minimal Solana BPF program (pinocchio): authority-gated batch SOL payouts from an owned PDA vault"
 publish = false
 
 [lib]
@@ -13,3 +13,8 @@ pinocchio = "0.7.1"
 
 [profile.release]
 overflow-checks = true
+
+[dev-dependencies]
+mollusk-svm = "0.17.1"
+solana-sdk = "5.0.0"
+solana-sdk-ids = "3.1.0"

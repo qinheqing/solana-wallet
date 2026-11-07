@@ -2,12 +2,19 @@
  * CPI batch transfers (F4.4 / task #7): client-side support for the
  * `solwallet_cpi` example program (packages/cpi-program).
  *
- * The program owns a PDA vault (seeds `[b"vault"]`) that holds SOL and pays
- * N recipients via one System Program CPI each. Everything on this side is
- * hand-rolled wire format — no Anchor IDL, no borsh:
+ * The program owns a PDA vault (seeds `[b"vault"]`) whose data holds a
+ * 32-byte stored authority pubkey. `initialize_vault` creates it (via a
+ * System Program CreateAccount CPI) and sets the authority; `batch_transfer`
+ * pays out N recipients, but only when the signer matches the stored
+ * authority — a signer who is not the authority is rejected on-chain.
+ * Everything on this side is hand-rolled wire format — no Anchor IDL, no
+ * borsh:
  *
- *   instruction data : u8 discriminant | u16 LE count | count × (32B pubkey + u64 LE lamports)
- *   accounts         : [authority(signer), vault(writable), recipient × count (writable)]
+ *   initialize_vault instruction data : u8 discriminant (0) | 32B authority pubkey
+ *   initialize_vault accounts         : [payer(signer,writable), vault(writable), systemProgram(readonly)]
+ *
+ *   batch_transfer instruction data : u8 discriminant (1) | u16 LE count | count × (32B pubkey + u64 LE lamports)
+ *   batch_transfer accounts         : [authority(signer,writable), vault(writable), systemProgram(readonly), recipient × count (writable)]
  *
  * `deployCpiProgram` implements the full BPFLoaderUpgradeable flow
  * (create buffer → InitializeBuffer → chunked Write → DeployWithMaxDataLen →
@@ -27,7 +34,9 @@ import {
 } from "@solana/web3.js";
 
 import type { ClusterConnection, ConfirmPolicy } from "../connection/connection.js";
-import { MainnetNotAllowedError, SolwalletError } from "../connection/errors.js";
+import { MainnetNotAllowedError, SolwalletError, TransactionSendError } from "../connection/errors.js";
+import { parseTransactionError, type ParsedProgramError } from "../utils/parse-error.js";
+import { dryRun } from "./dryrun.js";
 
 // ---------------------------------------------------------------------------
 // Program wire-format constants (must match packages/cpi-program/src/lib.rs)
@@ -38,6 +47,8 @@ export const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
 );
 
+/** Discriminant byte of the program's `initialize_vault` instruction. */
+export const CPI_INITIALIZE_VAULT_DISCRIMINANT = 0;
 /** Discriminant byte of the program's `batch_transfer` instruction. */
 export const CPI_BATCH_TRANSFER_DISCRIMINANT = 1;
 
@@ -48,6 +59,8 @@ export const CPI_VAULT_SEED = Buffer.from("vault");
 export const CPI_HEADER_BYTES = 3;
 /** Per-recipient instruction-data size (32B pubkey + 8B lamports). */
 export const CPI_ITEM_BYTES = 32 + 8;
+/** `initialize_vault` instruction-data size (disc + 32B authority pubkey). */
+export const CPI_INITIALIZE_VAULT_DATA_BYTES = 1 + 32;
 
 /** Buffer account header (Option<Pubkey> authority etc.), loader-side. */
 export const LOADER_BUFFER_HEADER_BYTES = 37;
@@ -119,10 +132,51 @@ export function serializeCpiBatchTransferData(
 }
 
 /**
+ * Serialize `initialize_vault` instruction data:
+ * `[discriminant: u8 (0)][authority: 32B pubkey]`
+ */
+export function serializeCpiInitializeVaultData(authority: PublicKey): Buffer {
+  const data = Buffer.alloc(CPI_INITIALIZE_VAULT_DATA_BYTES);
+  data.writeUInt8(CPI_INITIALIZE_VAULT_DISCRIMINANT, 0);
+  data.set(authority.toBytes(), 1);
+  return data;
+}
+
+/**
+ * Build the `initialize_vault` transaction instruction.
+ *
+ * Account layout (must match the Rust program): [0] payer (signer,
+ * writable — funds rent), [1] vault PDA (derived here, must not already
+ * exist), [2] System Program (readonly). `authority` need not equal
+ * `payer` — a relayer can fund the vault for a cold-wallet-controlled
+ * authority.
+ */
+export function buildCpiInitializeVaultInstruction(
+  programId: PublicKey,
+  payer: PublicKey,
+  authority: PublicKey,
+): TransactionInstruction {
+  const { vault } = findCpiVaultPda(programId);
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data: serializeCpiInitializeVaultData(authority),
+  });
+}
+
+/**
  * Build the `batch_transfer` transaction instruction.
  *
- * Account layout (must match the Rust program): [0] authority (signer),
- * [1] vault PDA (derived here), [2..] recipients — all writable.
+ * Account layout (must match the Rust program): [0] authority (signer,
+ * writable), [1] vault PDA (derived here, writable), [2] System Program
+ * (readonly — validated on-chain but not invoked by this instruction; the
+ * payout moves lamports by direct arithmetic since the vault carries data
+ * and the real System Program `Transfer` CPI cannot debit a data-carrying
+ * account), [3..] recipients (writable).
  */
 export function buildCpiBatchTransferInstruction(
   programId: PublicKey,
@@ -135,6 +189,7 @@ export function buildCpiBatchTransferInstruction(
     keys: [
       { pubkey: vaultAuthority, isSigner: true, isWritable: true },
       { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       ...recipients.map((r) => ({
         pubkey: r.to,
         isSigner: false,
@@ -145,16 +200,25 @@ export function buildCpiBatchTransferInstruction(
   });
 }
 
-/** Result of a confirmed `batch_transfer`. */
+/** Result of a `batch_transfer` call (sent or simulated). */
 export interface CpiBatchTransferResult {
+  /** Empty for simulated calls. */
   signature: string;
   slot: number;
+  /** Fee in lamports (0 for simulations). */
   feeLamports: number;
   /** Vault PDA the lamports were paid from. */
   vault: string;
   recipientCount: number;
   /** Sum of all lamports paid out. */
   totalLamports: bigint;
+  /** True when this was a dry-run simulation — nothing was sent on chain. */
+  simulatedOnly: boolean;
+  /** Populated by dryRun: full simulation logs. */
+  logs?: string[];
+  unitsConsumed?: number;
+  /** Parsed failure — set instead of throwing, for AI-friendly flows. */
+  error?: ParsedProgramError;
 }
 
 export interface CpiBatchTransferOptions {
@@ -162,6 +226,8 @@ export interface CpiBatchTransferOptions {
   allowMainnet?: boolean;
   /** Confirm/retry policy override forwarded to sendWithRetry. */
   policy?: Partial<ConfirmPolicy>;
+  /** Simulate only — nothing is sent on chain. */
+  dryRun?: boolean;
 }
 
 /**
@@ -169,6 +235,10 @@ export interface CpiBatchTransferOptions {
  * `batch_transfer` instruction, sign and send through sendWithRetry.
  * The on-chain program pays every recipient from the vault in one atomic
  * transaction — one signature covers N payouts.
+ *
+ * When `opts.dryRun` is set, the transaction is simulated instead of sent;
+ * send failures are also caught and returned as a parsed error rather than
+ * thrown, mirroring `transfer()` in `transfer.ts`.
  */
 export async function executeCpiBatchTransfer(
   conn: ClusterConnection,
@@ -191,18 +261,172 @@ export async function executeCpiBatchTransfer(
   const tx = new VersionedTransaction(message);
   tx.sign([from]);
 
-  const sent = await conn.sendWithRetry(tx, {
-    allowMainnet: opts.allowMainnet,
-    policy: opts.policy,
-  });
-  return {
-    signature: sent.signature,
-    slot: sent.slot,
-    feeLamports: sent.feeLamports,
-    vault: findCpiVaultPda(programId).vault.toBase58(),
-    recipientCount: recipients.length,
-    totalLamports: recipients.reduce((sum, r) => sum + BigInt(r.lamports), 0n),
-  };
+  const vault = findCpiVaultPda(programId).vault.toBase58();
+  const totalLamports = recipients.reduce((sum, r) => sum + BigInt(r.lamports), 0n);
+
+  if (opts.dryRun) {
+    const sim = await dryRun(conn, tx);
+    const base: CpiBatchTransferResult = {
+      signature: "",
+      slot: 0,
+      feeLamports: 0,
+      vault,
+      recipientCount: recipients.length,
+      totalLamports,
+      logs: sim.logs,
+      unitsConsumed: sim.unitsConsumed,
+      simulatedOnly: true,
+    };
+    if (!sim.ok) {
+      const simErr = {
+        message: `Transaction simulation failed: ${JSON.stringify(sim.err)}`,
+        logs: sim.logs,
+      };
+      return { ...base, error: parseTransactionError(simErr) };
+    }
+    return base;
+  }
+
+  try {
+    const sent = await conn.sendWithRetry(tx, {
+      allowMainnet: opts.allowMainnet,
+      policy: opts.policy,
+    });
+    return {
+      signature: sent.signature,
+      slot: sent.slot,
+      feeLamports: sent.feeLamports,
+      vault,
+      recipientCount: recipients.length,
+      totalLamports,
+      simulatedOnly: false,
+    };
+  } catch (error) {
+    return {
+      signature:
+        error instanceof TransactionSendError ? (error.signature ?? "") : "",
+      slot: 0,
+      feeLamports: 0,
+      vault,
+      recipientCount: recipients.length,
+      totalLamports,
+      simulatedOnly: false,
+      error: parseTransactionError(error),
+    };
+  }
+}
+
+/** Result of an `initialize_vault` call (sent or simulated). */
+export interface CpiInitializeVaultResult {
+  /** Empty for simulated calls. */
+  signature: string;
+  slot: number;
+  /** Fee in lamports (0 for simulations). */
+  feeLamports: number;
+  /** The vault PDA that was initialized. */
+  vault: string;
+  /** The authority stored on the vault. */
+  authority: string;
+  /** True when this was a dry-run simulation — nothing was sent on chain. */
+  simulatedOnly: boolean;
+  /** Populated by dryRun: full simulation logs. */
+  logs?: string[];
+  unitsConsumed?: number;
+  /** Parsed failure — set instead of throwing, for AI-friendly flows. */
+  error?: ParsedProgramError;
+}
+
+export interface CpiInitializeVaultOptions {
+  /** Explicit mainnet confirmation, forwarded to sendWithRetry. */
+  allowMainnet?: boolean;
+  /** Confirm/retry policy override forwarded to sendWithRetry. */
+  policy?: Partial<ConfirmPolicy>;
+  /** Simulate only — nothing is sent on chain. */
+  dryRun?: boolean;
+}
+
+/**
+ * Initialize the CPI program's vault: derive the vault PDA, build the
+ * `initialize_vault` instruction, sign and send through sendWithRetry.
+ * `payer` funds the vault's rent and pays the transaction fee; `authority`
+ * is the pubkey stored on-chain as the only signer later allowed to
+ * withdraw via `executeCpiBatchTransfer` (it need not equal `payer`).
+ *
+ * When `opts.dryRun` is set, the transaction is simulated instead of sent;
+ * send failures are also caught and returned as a parsed error rather than
+ * thrown, mirroring `transfer()` in `transfer.ts`.
+ */
+export async function initializeCpiVault(
+  conn: ClusterConnection,
+  payer: Keypair,
+  programId: PublicKey,
+  authority: PublicKey,
+  opts: CpiInitializeVaultOptions = {},
+): Promise<CpiInitializeVaultResult> {
+  const instruction = buildCpiInitializeVaultInstruction(
+    programId,
+    payer.publicKey,
+    authority,
+  );
+  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const message = new TransactionMessage({
+    payerKey: payer.publicKey,
+    recentBlockhash: blockhash,
+    instructions: [instruction],
+  }).compileToV0Message();
+  const tx = new VersionedTransaction(message);
+  tx.sign([payer]);
+
+  const vault = findCpiVaultPda(programId).vault.toBase58();
+  const authorityBase58 = authority.toBase58();
+
+  if (opts.dryRun) {
+    const sim = await dryRun(conn, tx);
+    const base: CpiInitializeVaultResult = {
+      signature: "",
+      slot: 0,
+      feeLamports: 0,
+      vault,
+      authority: authorityBase58,
+      logs: sim.logs,
+      unitsConsumed: sim.unitsConsumed,
+      simulatedOnly: true,
+    };
+    if (!sim.ok) {
+      const simErr = {
+        message: `Transaction simulation failed: ${JSON.stringify(sim.err)}`,
+        logs: sim.logs,
+      };
+      return { ...base, error: parseTransactionError(simErr) };
+    }
+    return base;
+  }
+
+  try {
+    const sent = await conn.sendWithRetry(tx, {
+      allowMainnet: opts.allowMainnet,
+      policy: opts.policy,
+    });
+    return {
+      signature: sent.signature,
+      slot: sent.slot,
+      feeLamports: sent.feeLamports,
+      vault,
+      authority: authorityBase58,
+      simulatedOnly: false,
+    };
+  } catch (error) {
+    return {
+      signature:
+        error instanceof TransactionSendError ? (error.signature ?? "") : "",
+      slot: 0,
+      feeLamports: 0,
+      vault,
+      authority: authorityBase58,
+      simulatedOnly: false,
+      error: parseTransactionError(error),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
