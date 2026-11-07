@@ -399,14 +399,14 @@
         "dependencies": [
           "1"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "初始化 Anchor 项目与程序结构设计",
             "description": "在 packages/cpi-program 中初始化 Anchor 项目，设计程序骨架与指令结构：MultiTransfer 上下文接收 vault_authority、recipients: Vec<Pubkey>、amounts: Vec<u64>、mint 等参数",
             "dependencies": [],
-            "details": "使用 anchor init 创建项目并配置 Anchor.toml（program_id、provider.cluster 默认 localnet）。在 lib.rs 中声明 #[program] 模块与 multi_transfer 指令，定义 Accounts 结构：vault token account、vault_authority（signer）、mint、逐 recipient 的关联 token account（remaining_accounts 方式）或显式账户列表；校验 recipients.length == amounts.length，账户所有权与 mint PDA 约束。仅作为 dev/testnet 环境的示例程序，不做升级权限复杂设计。",
+            "details": "使用 anchor init 创建项目并配置 Anchor.toml（program_id、provider.cluster 默认 localnet）。在 lib.rs 中声明 #[program] 模块与 multi_transfer 指令，定义 Accounts 结构：vault token account、vault_authority（signer）、mint、逐 recipient 的关联 token account（remaining_accounts 方式）或显式账户列表；校验 recipients.length == amounts.length，账户所有权与 mint PDA 约束。仅作为 dev/testnet 环境的示例程序，不做升级权限复杂设计。\n<info added on 2026-11-07T01:58:31.322Z>\n技术决策变更：弃用 Anchor/pinocchio，改用零依赖手写 BPF 程序，规避额外工具链安装。packages/cpi-program/src/lib.rs 实现 solwallet_cpi 程序：batch_transfer 指令从 PDA vault（seeds=[b\"vault\"]）循环发起 CPI 调用 System Program，向 N 个接收者逐笔转账（替代原 token::transfer 方案，改为原生 SOL 转账，无需 SPL Token 账户）。已完成：在 Rust 1.99.1 + Solana CLI 4.3.2 环境下使用 cargo-build-sbf 编译成功，产出 target/deploy/solwallet_cpi.so（12KB）。\n</info added on 2026-11-07T01:58:31.322Z>",
             "status": "pending",
             "testStrategy": "anchor build 编译通过；anchor test 空 shell 在本地 validator 上成功部署程序",
             "parentId": "undefined"
@@ -414,11 +414,11 @@
           {
             "id": 2,
             "title": "实现 CPI 循环 token::transfer 转账逻辑",
-            "description": "在 multi_transfer 指令中实现 CPI 循环调用 token::transfer，将 vault 中指定数量的代币按 amounts 逐笔转给 recipients",
+            "description": "在 multi_transfer 指令中实现 CPI 循环调用 token::transfer，将 vault 中指定数量的代币按 amounts 逐笔转给 recipients [Updated: 2026/11/7]",
             "dependencies": [
               1
             ],
-            "details": "引入 anchor-spl token 模块，在循环中遍历 recipients/amounts zip，逐笔通过 CpiContext::new 调用 token::transfer（authority 为 vault_authority，from 为 vault token account，to 为对应 recipient token account）。加入长度一致性断言、金额为零/溢出检查；依赖 Solana 原子性保证任一笔 CPI 失败即整笔指令回滚。保持程序最小化，不含额外业务逻辑。",
+            "details": "引入 anchor-spl token 模块，在循环中遍历 recipients/amounts zip，逐笔通过 CpiContext::new 调用 token::transfer（authority 为 vault_authority，from 为 vault token account，to 为对应 recipient token account）。加入长度一致性断言、金额为零/溢出检查；依赖 Solana 原子性保证任一笔 CPI 失败即整笔指令回滚。保持程序最小化，不含额外业务逻辑。\n<info added on 2026-11-07T01:59:05.893Z>\n完成：指令数据改为手工序列化，避免引入 borsh 依赖。数据布局为：discriminant（8 字节，Anchor 风格 sha256 前 8 字节）+ count（u16 小端）+ 每项定长 40 字节（32B recipient pubkey + 8B lamports，u64 小端）。链上 multi_transfer 入口直接接收 Vec<u8>，按偏移量逐字段手工解析：先校验总长度等于 8 + 2 + count * 40，pubkey 用 Pubkey::new_from_array 构造，lamports 用 u64::from_le_bytes 读取，count 与实际项数不一致时直接报错。客户端提供 serializeMultiTransfer(recipients, amounts) 手工拼接 Uint8Array（PublicKey.toBytes() 取 32 字节，金额以 BigInt 小端写入 8 字节），与链上解析保持字节级对齐。补充单元测试覆盖序列化/解析往返一致性、长度不足截断、count 与实际项数不匹配、空列表等边界情况。\n</info added on 2026-11-07T01:59:05.893Z>",
             "status": "pending",
             "testStrategy": "anchor test：本地 validator 上创建 vault 与多个接收方 ATA，执行 multi_transfer 后断言各接收方余额正确、vault 余额扣减一致",
             "parentId": "undefined"
@@ -430,7 +430,7 @@
             "dependencies": [
               2
             ],
-            "details": "编写 scripts/build.sh（封装 anchor build，输出 .so 路径）与 scripts/deploy.sh：localnet 模式用 solana program deploy --url localhost；testnet 模式部署到 devnet/testnet，若目标是 mainnet-beta 则直接拒绝并报错（安全护栏）。脚本读取 Keypair 路径环境变量，部署后输出 programId 并同步到 Anchor.toml/前端常量。在 package.json 中加入 build/deploy npm scripts 供 pnpm 调用。",
+            "details": "编写 scripts/build.sh（封装 anchor build，输出 .so 路径）与 scripts/deploy.sh：localnet 模式用 solana program deploy --url localhost；testnet 模式部署到 devnet/testnet，若目标是 mainnet-beta 则直接拒绝并报错（安全护栏）。脚本读取 Keypair 路径环境变量，部署后输出 programId 并同步到 Anchor.toml/前端常量。在 package.json 中加入 build/deploy npm scripts 供 pnpm 调用。\n<info added on 2026-11-07T01:59:24.013Z>\n在 core 侧新增 packages/core/src/transfer/cpi.ts 并完成以下实现：deployCpiProgram 实现基于 BPFLoaderUpgradeable 的完整部署流程——先创建并初始化 buffer 账户，将 .so 内容按固定分块（chunk）生成多条 Write 指令逐块写入，再创建程序账户（programId keypair）并执行 DeployWithMaxDataLen 指令完成部署，最后 Close buffer 账户取回租金退费；函数入参接受 Buffer 或 .so 文件路径两种形式（路径时内部用 node:fs/promises.readFile 读取）。提供 findProgramDataAddress 与 findCpiVaultPda 两个 PDA 推导辅助函数（基于 PublicKey.findProgramAddressSync）。executeCpiBatchTransfer 负责编排批量 CPI 转账：调用 CPI 程序完成多笔 token::transfer，组装交易、发送、确认并收集回执。mainnet 守卫透传：部署与批量转账均接收 allowMainnet 选项并复用 ClusterConnection 的 mainnet-beta 风险校验，未显式允许时直接拒绝执行。\n</info added on 2026-11-07T01:59:24.013Z>",
             "status": "pending",
             "testStrategy": "在 localnet（solana-test-validator）上执行 deploy 脚本成功并返回 programId；验证脚本传入 mainnet 时拒绝执行",
             "parentId": "undefined"
@@ -444,7 +444,7 @@
               2,
               3
             ],
-            "details": "deployCpiProgram：接收 ClusterConnection 与 .so 文件路径/buffer，使用 BPF loader（bpf_loader_upgradeable）部署，内部强制校验 cluster 为 devnet/testnet/localnet，mainnet-beta 抛出与 ClusterConnection 一致的风险错误。buildCpiTransferInstruction：根据 programId、vault、authority、recipients、amounts 构造 TransactionInstruction，账户元数据与顺序须与 Anchor Accounts 结构一致（含 remaining_accounts 映射）。导出类型定义并保持 core 零 UI 依赖。",
+            "details": "deployCpiProgram：接收 ClusterConnection 与 .so 文件路径/buffer，使用 BPF loader（bpf_loader_upgradeable）部署，内部强制校验 cluster 为 devnet/testnet/localnet，mainnet-beta 抛出与 ClusterConnection 一致的风险错误。buildCpiTransferInstruction：根据 programId、vault、authority、recipients、amounts 构造 TransactionInstruction，账户元数据与顺序须与 Anchor Accounts 结构一致（含 remaining_accounts 映射）。导出类型定义并保持 core 零 UI 依赖。\n<info added on 2026-11-07T01:59:42.346Z>\n已完成：编写 packages/cpi-program/README.md 部署说明文档；新增 cpi.test.ts 共 11 项测试，覆盖 PDA 确定性、指令数据布局往返一致性、fake connection 下部署全流程（共 5 笔交易：init、write×2、deploy、close，并反解码交易断言分块偏移与程序 ID 正确性）、mainnet-beta 部署拒绝、空字节拒绝。修复子代理因 API 429 中断遗留的三处问题：一是解码后指令 data 实际为 Uint8Array 而非 Buffer（不存在 readUInt32LE/equals 方法），改用 DataView 读取并以 Buffer.from 包装后比较；二是 web3.js MessageCompiledInstruction 实际字段名为 accountKeyIndexes 而非 accounts，已更正断言字段名；三是 ESM 环境下 vi.spyOn 无法重定义 node:fs/promises 具名导出，改用顶层 vi.mock 实现 mock。全部测试通过。\n</info added on 2026-11-07T01:59:42.346Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：buildCpiTransferInstruction 生成的 keys/data 结构正确（与 Anchor IDL 账户顺序一致）；deployCpiProgram 在 mainnet-beta 输入下抛错，mock Connection 下 localnet/devnet 流程可调用成功；可选集成测试（标记）构造 CPI 调用验证代币到达接收方账户",
             "parentId": "undefined"
@@ -452,7 +452,8 @@
         ],
         "complexity": 6,
         "recommendedSubtasks": 4,
-        "expansionPrompt": "将任务7拆分为：1) Anchor 项目初始化与程序结构设计（recipients/amounts 指令）；2) 实现 CPI 循环 token::transfer 逻辑；3) build/deploy 脚本（localnet/testnet，限 dev/test）；4) core 侧 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数；5) anchor test 本地 validator 测试与集成验证。"
+        "expansionPrompt": "将任务7拆分为：1) Anchor 项目初始化与程序结构设计（recipients/amounts 指令）；2) 实现 CPI 循环 token::transfer 逻辑；3) build/deploy 脚本（localnet/testnet，限 dev/test）；4) core 侧 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数；5) anchor test 本地 validator 测试与集成验证。",
+        "updatedAt": "2026-11-07T02:00:30.319Z"
       },
       {
         "id": "8",
@@ -465,14 +466,14 @@
           "2",
           "4"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "实现 SPL createMint2/initializeMint 基础发币封装",
             "description": "封装 SPL Token 标准 mint 创建：createMint2/initializeMint，支持配置 decimals、mint authority、freeze authority",
             "dependencies": [],
-            "details": "使用 @solana/spl-token 的 createMint2 或手动组装 createInitializeMintInstruction：定义 CreateSplMintParams 结构 {decimals, mintAuthority, freezeAuthority?}，校验 decimals 在 0-9 边界、authority 为有效 PublicKey；封装到 createSplMint 函数，内部生成 mint Keypair、计算 rent 豁免最小余额、发送并确认交易，返回 {mint, signature}",
+            "details": "使用 @solana/spl-token 的 createMint2 或手动组装 createInitializeMintInstruction：定义 CreateSplMintParams 结构 {decimals, mintAuthority, freezeAuthority?}，校验 decimals 在 0-9 边界、authority 为有效 PublicKey；封装到 createSplMint 函数，内部生成 mint Keypair、计算 rent 豁免最小余额、发送并确认交易，返回 {mint, signature}\n<info added on 2026-11-07T01:59:59.120Z>\n完成（子代理实现）：新增 createSplToken，基于 createAccount + createInitializeMintInstruction 组装并发送交易，完成标准 SPL Token mint 创建；新增 createToken2022，使用 getMintLen 按启用的扩展列表计算 mint 账户空间，逐扩展调用对应的 createInitialize*Instruction 并合并至单笔交易发送确认；支持的扩展包括 transferFeeConfig、transferHook、interestBearingConfig、nonTransferable、permanentDelegate、metadataPointer+tokenMetadata、defaultAccountState；mint 账户统一使用 Keypair.generate() 生成。\n</info added on 2026-11-07T01:59:59.120Z>",
             "status": "pending",
             "testStrategy": "单元测试：参数校验（decimals 边界、非法公钥）、指令构造正确性；devnet 可选集成测试创建成功并验证链上 mint 状态",
             "parentId": "undefined"
@@ -480,9 +481,9 @@
           {
             "id": 2,
             "title": "定义 Token2022 扩展参数结构与校验",
-            "description": "结构化定义 Token2022 各扩展参数（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）并实现校验逻辑",
+            "description": "结构化定义 Token2022 各扩展参数（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）并实现校验逻辑 [Updated: 2026/11/7]",
             "dependencies": [],
-            "details": "定义 discriminated union 类型的 Token2022ExtensionParams：TransferFeeConfig {transferFeeBasisPoints, maximumFee}、InterestBearingConfig {rate i8}、NonTransferable、PermanentDelegate {delegate}、DefaultAccountState {frozen} 等；实现 validateExtensions(params) 函数校验费率上限（≤10000 bps）、参数边界与必填字段；类型定义独立成文件供指令组装与 MCP 层复用",
+            "details": "定义 discriminated union 类型的 Token2022ExtensionParams：TransferFeeConfig {transferFeeBasisPoints, maximumFee}、InterestBearingConfig {rate i8}、NonTransferable、PermanentDelegate {delegate}、DefaultAccountState {frozen} 等；实现 validateExtensions(params) 函数校验费率上限（≤10000 bps）、参数边界与必填字段；类型定义独立成文件供指令组装与 MCP 层复用\n<info added on 2026-11-07T02:00:15.766Z>\n已完成实现：packages/core/src/token/create.ts 定义 Token2022 扩展参数 discriminated union 与创建流程入口；manage.ts 实现扩展参数管理接口与运行时校验入口；internal.ts 抽取共享辅助（类型守卫、参数规范化、统一错误构造）。validateExtensions 校验覆盖：transferFeeBasisPoints ≤10000 bps 上限、maximumFee 非负、rate 落在 i8 边界（-128~127）、必填字段非空（如 PermanentDelegate 的 delegate 地址格式合法性、DefaultAccountState 的 frozen 布尔值）。测试：16 个以上 Vitest 单元测试全部通过，覆盖多扩展组合场景（TransferFee+InterestBearing、NonTransferable+DefaultAccountState、PermanentDelegate+TransferFee 等）与非法参数拒绝路径（超限费率、越界利率、缺失必填字段、非法 delegate 地址）；类型与校验逻辑已按计划独立成文件，可供 8.3 指令组装与 MCP 层直接复用。\n</info added on 2026-11-07T02:00:15.766Z>",
             "status": "pending",
             "testStrategy": "单元测试：费率上限边界（0/10000/超限）、rate 与 decimals 边界、非法参数报错信息、合法组合通过校验",
             "parentId": "undefined"
@@ -528,7 +529,8 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 5,
-        "expansionPrompt": "将任务8拆分为：1) SPL createMint2/initializeMint 基础封装（decimals/authorities）；2) Token2022 扩展参数结构化定义与校验（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）；3) Token2022 扩展初始化指令组装（各 createInitialize*Instruction）；4) Token Metadata 三指令流程集成；5) mintTo/burn 统一接口；6) 单元测试 + devnet 可选集成测试。"
+        "expansionPrompt": "将任务8拆分为：1) SPL createMint2/initializeMint 基础封装（decimals/authorities）；2) Token2022 扩展参数结构化定义与校验（Transfer Fee、Interest Bearing、Non-Transferable、Permanent Delegate、Default Account State 等）；3) Token2022 扩展初始化指令组装（各 createInitialize*Instruction）；4) Token Metadata 三指令流程集成；5) mintTo/burn 统一接口；6) 单元测试 + devnet 可选集成测试。",
+        "updatedAt": "2026-11-07T02:00:31.669Z"
       },
       {
         "id": "9",
@@ -540,14 +542,14 @@
         "dependencies": [
           "8"
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "TokenManager 类骨架与 authority 校验机制",
             "description": "创建 TokenManager 类基础结构，统一封装 authority 权限校验机制，为后续各运行时管理操作提供基础。",
             "dependencies": [],
-            "details": "在 packages/core 中新建 TokenManager 类，构造时接收 ClusterConnection 与 payer Keypair。定义 AuthorityType 映射与统一的 assertAuthority(owner, requiredAuthority) 方法：通过 getMint 读取 mint 的 authority 字段与扩展状态，校验当前钱包 pubkey 是否持有对应 authority（mintAuthority/freezeAuthority），不满足时抛出带上下文的明确错误，包含缺失的 authority 类型、当前钱包地址与建议（如需先执行 setAuthority 转移权限）。预留 setTransferFee、freezeAccount 等公共方法签名供后续子任务填充实现。",
+            "details": "在 packages/core 中新建 TokenManager 类，构造时接收 ClusterConnection 与 payer Keypair。定义 AuthorityType 映射与统一的 assertAuthority(owner, requiredAuthority) 方法：通过 getMint 读取 mint 的 authority 字段与扩展状态，校验当前钱包 pubkey 是否持有对应 authority（mintAuthority/freezeAuthority），不满足时抛出带上下文的明确错误，包含缺失的 authority 类型、当前钱包地址与建议（如需先执行 setAuthority 转移权限）。预留 setTransferFee、freezeAccount 等公共方法签名供后续子任务填充实现。\n<info added on 2026-11-07T02:00:28.499Z>\nmanage.ts 已完成全量实现：mintTokens（目标 ATA 幂等创建 + mintTo）、burnTokens、setTransferFee（Token2022 Transfer Fee 扩展指令）、freezeTokenAccount/thawTokenAccount、setMintAuthority/setFreezeAuthority（封装 setAuthority 指令）、updateTokenMetadata。运行时程序校验：非 Token2022 mint 调用任一管理操作时统一抛出 TOKEN_PROGRAM_MISMATCH 错误。所有管理方法统一返回 {signature, slot, feeLamports} 结构，并支持 dryRun 预检模式。MCP 层 create_token 与 manage_token2022 工具已接入 TokenManager 真实现，原占位符代码已删除。备注：MCP server.ts/token.ts 与多签代理模块的并行编辑冲突已自然消解（两者修改区域各自独立，无需额外合并处理）。\n</info added on 2026-11-07T02:00:28.499Z>",
             "status": "pending",
             "testStrategy": "Vitest 单元测试：mock getMint 返回不同 authority，断言 assertAuthority 在匹配时不抛错、不匹配时抛出的错误信息包含 authority 类型与当前钱包地址及建议内容。",
             "parentId": "undefined"
@@ -592,7 +594,8 @@
         ],
         "complexity": 5,
         "recommendedSubtasks": 4,
-        "expansionPrompt": "将任务9拆分为：1) TokenManager 类骨架与 authority 校验机制；2) setTransferFee 与 freeze/thawAccount 实现；3) setAuthority（MintTokens/FreezeAccount）与 updateField 元数据更新；4) 单元测试 + devnet 完整流程集成测试。"
+        "expansionPrompt": "将任务9拆分为：1) TokenManager 类骨架与 authority 校验机制；2) setTransferFee 与 freeze/thawAccount 实现；3) setAuthority（MintTokens/FreezeAccount）与 updateField 元数据更新；4) 单元测试 + devnet 完整流程集成测试。",
+        "updatedAt": "2026-11-07T02:00:33.030Z"
       },
       {
         "id": "10",
@@ -998,9 +1001,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-07T01:57:53.182Z",
+      "lastModified": "2026-11-07T02:00:33.030Z",
       "taskCount": 14,
-      "completedCount": 9,
+      "completedCount": 12,
       "tags": [
         "master"
       ]
