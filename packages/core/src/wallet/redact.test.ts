@@ -23,7 +23,7 @@ describe("redact / sanitizers (3.5)", () => {
 
   it("shortAddress truncates long addresses, keeps short ones", () => {
     expect(shortAddress("EPdcT7VfA9GpkvM3YAx9TntdMHPnfhsJ7hPM7paVhxN9")).toMatch(
-      /^EPdc…hxN9$/,
+      /^EPdcT7…hxN9$/,
     );
     expect(shortAddress("short")).toBe("short");
   });

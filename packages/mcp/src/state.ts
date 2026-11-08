@@ -22,7 +22,16 @@ export interface StoredWallet {
 export class WalletStore {
   private wallets = new Map<string, StoredWallet>();
 
-  put(wallet: StoredWallet): void {
+  /**
+   * Store a wallet. Refuses to silently replace an existing wallet of the
+   * same name unless `overwrite` is true.
+   */
+  put(wallet: StoredWallet, opts: { overwrite?: boolean } = {}): void {
+    if (this.wallets.has(wallet.name) && !opts.overwrite) {
+      throw new Error(
+        `Wallet "${wallet.name}" already exists; pick another name or pass overwrite: true.`,
+      );
+    }
     this.wallets.set(wallet.name, wallet);
   }
 

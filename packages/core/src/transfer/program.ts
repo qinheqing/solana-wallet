@@ -36,7 +36,12 @@ export async function getMintProgram(
       },
     );
   }
-  const owner = info.owner.toBase58();
+  return mintProgramFromOwner(mint, info.owner);
+}
+
+/** Pure half of getMintProgram: classify an already-fetched mint by its owner (throws NOT_A_MINT). */
+export function mintProgramFromOwner(mint: PublicKey, ownerKey: PublicKey): MintProgram {
+  const owner = ownerKey.toBase58();
   if (owner === TOKEN_PROGRAM_ID.toBase58()) {
     return { kind: "spl-token", programId: TOKEN_PROGRAM_ID };
   }

@@ -2,13 +2,15 @@
  * Token mint creation (task #8): classic SPL mints and Token-2022 mints
  * with optional extensions, all in ONE transaction per mint.
  *
- * Extension space is computed via getMintLen(extensions) — including the
- * variable-length TokenMetadata TLV — so the mint account is allocated
- * rent-exempt correctly up front.
+ * Extension space is computed via getMintLen(fixed extensions). The
+ * variable-length TokenMetadata TLV is NOT part of the allocated space
+ * (InitializeMint2 rejects over-sized accounts); instead its bytes are
+ * pre-funded in lamports so the metadata program can realloc rent-free.
  */
 import {
   AccountState,
   ExtensionType,
+  LENGTH_SIZE,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createInitializeDefaultAccountStateInstruction,
@@ -18,8 +20,10 @@ import {
   createInitializeMintInstruction,
   createInitializeNonTransferableMintInstruction,
   createInitializePermanentDelegateInstruction,
+  createInitializeScaledUiAmountConfigInstruction,
   createInitializeTransferFeeConfigInstruction,
   createInitializeTransferHookInstruction,
+  TYPE_SIZE,
   getMintLen,
 } from "@solana/spl-token";
 import { createInitializeInstruction, pack } from "@solana/spl-token-metadata";
@@ -82,6 +86,18 @@ export interface Token2022ExtensionOptions {
   defaultAccountState?: {
     /** Only 'frozen' is representable (accounts start frozen). */
     accountState: "frozen";
+  };
+  /**
+   * ScaledUiAmount (PRD T-F): wallets/explorers multiply raw amounts by
+   * `multiplier` for DISPLAY ONLY. On-chain balances, transfer amounts and
+   * every amount this library accepts or returns stay raw base units — the
+   * wallet never scales amounts by this multiplier.
+   */
+  scaledUiAmount?: {
+    /** Display multiplier (f64 on chain), must be > 0. */
+    multiplier: number;
+    /** Authority allowed to update the multiplier. Defaults to the payer. */
+    authority?: string | PublicKey;
   };
 }
 
@@ -159,6 +175,16 @@ function validateExtensions(ext: Token2022ExtensionOptions): void {
       {
         code: "ACCOUNT_STATE_INVALID",
         hint: "Only a frozen default is representable on chain: new accounts start frozen until a freeze authority thaws them.",
+      },
+    );
+  }
+  const scaled = ext.scaledUiAmount;
+  if (scaled && !(Number.isFinite(scaled.multiplier) && scaled.multiplier > 0)) {
+    throw new SolwalletError(
+      `scaledUiAmount.multiplier must be a finite number > 0, got ${scaled.multiplier}.`,
+      {
+        code: "SCALED_UI_MULTIPLIER_INVALID",
+        hint: "The multiplier only changes how UIs display balances (raw × multiplier); 1 means no scaling.",
       },
     );
   }
@@ -241,18 +267,27 @@ export async function createToken2022(
   const freezeAuthority = authorityKey(opts.freezeAuthority, from.publicKey);
   const hasMetadata = ext.tokenMetadata !== undefined;
 
-  // --- account space: fixed extension lengths + variable TokenMetadata TLV
+  // --- account space: fixed-size extensions only (MetadataPointer included).
+  // Token-2022's InitializeMint2 requires the account length to equal the
+  // length computed from its initialized fixed extensions — allocating the
+  // TokenMetadata TLV up front makes it fail with InvalidAccountData.
+  // Instead, the metadata bytes are pre-funded as rent (TYPE + LENGTH header
+  // + packed metadata) so createInitializeInstruction can realloc in place.
   const extensionTypes: ExtensionType[] = [];
   if (ext.transferFeeConfig) extensionTypes.push(ExtensionType.TransferFeeConfig);
   if (ext.transferHook) extensionTypes.push(ExtensionType.TransferHook);
   if (ext.interestBearingConfig) extensionTypes.push(ExtensionType.InterestBearingConfig);
   if (ext.nonTransferable) extensionTypes.push(ExtensionType.NonTransferable);
   if (ext.permanentDelegate) extensionTypes.push(ExtensionType.PermanentDelegate);
-  if (hasMetadata) extensionTypes.push(ExtensionType.MetadataPointer, ExtensionType.TokenMetadata);
+  if (hasMetadata) extensionTypes.push(ExtensionType.MetadataPointer);
   if (ext.defaultAccountState) extensionTypes.push(ExtensionType.DefaultAccountState);
+  if (ext.scaledUiAmount) extensionTypes.push(ExtensionType.ScaledUiAmountConfig);
 
+  const space = getMintLen(extensionTypes);
   const metadataLen = hasMetadata
-    ? pack({
+    ? TYPE_SIZE +
+      LENGTH_SIZE +
+      pack({
         mint: mint.publicKey,
         updateAuthority: from.publicKey,
         name: ext.tokenMetadata!.name,
@@ -260,17 +295,11 @@ export async function createToken2022(
         uri: ext.tokenMetadata!.uri,
         additionalMetadata: [],
       }).length
-    : undefined;
-  // Variable-length extensions (TokenMetadata) must NOT be in the fixed list —
-  // their size is passed separately so getMintLen can add type+length headers.
-  const space = getMintLen(
-    metadataLen === undefined
-      ? extensionTypes
-      : extensionTypes.filter((t) => t !== ExtensionType.TokenMetadata),
-    metadataLen === undefined ? undefined : { [ExtensionType.TokenMetadata]: metadataLen },
-  );
+    : 0;
 
-  const lamports = await conn.connection.getMinimumBalanceForRentExemption(space);
+  const lamports = await conn.connection.getMinimumBalanceForRentExemption(
+    space + metadataLen,
+  );
 
   const instructions: TransactionInstruction[] = [
     SystemProgram.createAccount({
@@ -343,6 +372,17 @@ export async function createToken2022(
       createInitializeDefaultAccountStateInstruction(
         mint.publicKey,
         AccountState.Frozen,
+      ),
+    );
+  }
+
+  if (ext.scaledUiAmount) {
+    instructions.push(
+      createInitializeScaledUiAmountConfigInstruction(
+        mint.publicKey,
+        ext.scaledUiAmount.authority ? toPublicKey(ext.scaledUiAmount.authority) : from.publicKey,
+        ext.scaledUiAmount.multiplier,
+        TOKEN_2022_PROGRAM_ID,
       ),
     );
   }

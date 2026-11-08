@@ -72,6 +72,9 @@ describe("importFromMnemonic (3.2)", () => {
     expect(m12.split(" ")).toHaveLength(12);
     expect(m24.split(" ")).toHaveLength(24);
     const w = await importFromMnemonic(m24);
-    expect(w.address.toBase58()).toHaveLength(44);
+    // A 32-byte key encodes to 43 or 44 base58 chars (~6% are 43) — assert
+    // the alphabet/length range rather than an exact length (was flaky).
+    expect(w.address.toBase58()).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    expect(w.address.toBytes()).toHaveLength(32);
   });
 });

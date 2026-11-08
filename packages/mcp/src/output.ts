@@ -7,13 +7,26 @@ import type { WalletStore } from "./state.js";
 
 const SENSITIVE_KEY = /secret|mnemonic|seed[-_ ]?phrase|private[-_ ]?key|password|passphrase/i;
 
-/** Recursively mask values under sensitive-looking keys. */
-function maskSensitiveKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(maskSensitiveKeys);
+const REDACTED = "[REDACTED]";
+
+/**
+ * Recursively walk a value: mask values under sensitive-looking keys and
+ * replace any string that CONTAINS a known secret (substring match) with
+ * "[REDACTED]". Working on the object graph before JSON.stringify keeps the
+ * output valid JSON — a textual replacement inside a quoted string would not.
+ */
+function scrub(value: unknown, secrets: string[]): unknown {
+  if (typeof value === "string") {
+    for (const secret of secrets) {
+      if (value.includes(secret)) return REDACTED;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => scrub(v, secrets));
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      out[k] = SENSITIVE_KEY.test(k) ? "[REDACTED]" : maskSensitiveKeys(v);
+      out[k] = SENSITIVE_KEY.test(k) ? REDACTED : scrub(v, secrets);
     }
     return out;
   }
@@ -21,18 +34,13 @@ function maskSensitiveKeys(value: unknown): unknown {
 }
 
 /**
- * Build the sanitizer for one server instance: masks sensitive keys and
- * replaces every registered secret string wherever it appears.
+ * Build the sanitizer for one server instance. Secrets are read from the
+ * store on EVERY call (not snapshotted at construction) so wallets imported
+ * after server start are covered too.
  */
 export function makeSanitizer(store: WalletStore) {
-  const secrets = store.allSecrets();
-
   return function sanitize(value: unknown): string {
-    const masked = maskSensitiveKeys(value);
-    let text = JSON.stringify(masked, null, 2);
-    for (const secret of secrets) {
-      if (secret.length > 0) text = text.split(secret).join('"[REDACTED]"');
-    }
-    return text;
+    const secrets = store.allSecrets().filter((s) => s.length > 0);
+    return JSON.stringify(scrub(value, secrets), null, 2);
   };
 }

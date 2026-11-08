@@ -19,8 +19,11 @@ export interface TokenBalance {
   /** Raw amount in base units (string to avoid precision loss). */
   amount: string;
   decimals: number;
-  /** Human-readable amount (float precision) — display only. */
-  uiAmount: number | null;
+  /**
+   * DISPLAY ONLY (float, lossy). Optional: core never computes with it and
+   * the MCP layer strips it; only UI code may read it.
+   */
+  uiAmount?: number | null;
   program: TokenProgram;
 }
 

@@ -298,7 +298,7 @@ export async function executeBatchTransfer(
 
     // Fresh blockhash per batch: earlier confirmations may have consumed
     // most of the previous one's validity window.
-    const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+    const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
     const message = new TransactionMessage({
       payerKey: from.publicKey,
       recentBlockhash: blockhash,
@@ -336,6 +336,7 @@ export async function executeBatchTransfer(
 
     try {
       const sent = await conn.sendWithRetry(tx, {
+        lastValidBlockHeight,
         allowMainnet: opts.allowMainnet,
         policy: opts.policy,
       });

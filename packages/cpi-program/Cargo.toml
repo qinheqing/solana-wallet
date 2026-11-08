@@ -2,14 +2,14 @@
 name = "solwallet-cpi"
 version = "0.1.0"
 edition = "2021"
-description = "Minimal Solana BPF program (pinocchio): authority-gated batch SOL payouts from an owned PDA vault"
+description = "Minimal Solana BPF program (pinocchio): authority-gated batch SOL payouts from an owned PDA vault + a TransferChecked CPI forwarder"
 publish = false
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-pinocchio = "0.7.1"
+pinocchio = { version = "0.7.1", features = ["std"] }
 
 [profile.release]
 overflow-checks = true
@@ -18,3 +18,4 @@ overflow-checks = true
 mollusk-svm = "0.17.1"
 solana-sdk = "5.0.0"
 solana-sdk-ids = "3.1.0"
+mollusk-svm-programs-token = "0.17.1"

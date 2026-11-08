@@ -31,10 +31,11 @@ export function ConfirmDialog({
         <div className="mb-4 text-sm text-zinc-300">{description}</div>
         {requireText !== undefined && (
           <div className="mb-4">
-            <label className="mb-1 block text-xs text-zinc-400">
+            <label htmlFor="confirm-dialog-typed" className="mb-1 block text-xs text-zinc-400">
               Type &quot;{requireText}&quot; to confirm
             </label>
             <input
+              id="confirm-dialog-typed"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 focus:border-emerald-600 focus:outline-none"

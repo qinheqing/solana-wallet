@@ -47,6 +47,8 @@ export function MultisigPage() {
   const [propAmount, setPropAmount] = useState("");
   const [proposalBusy, setProposalBusy] = useState(false);
   const [proposalError, setProposalError] = useState<string | null>(null);
+  // approve/execute failures (core returns .error instead of throwing)
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const create = async () => {
     setCreateError(null);
@@ -97,10 +99,14 @@ export function MultisigPage() {
     try {
       setProposalBusy(true);
       const lamports = parseAmount(propAmount, 9);
-      await createMultisigProposal(connection, keypair, new PublicKey(msState.multisigPda), {
+      const res = await createMultisigProposal(connection, keypair, new PublicKey(msState.multisigPda), {
         destination: propDestination,
         amount: lamports,
       });
+      if (res.error) {
+        setProposalError(`${res.error.code}: ${res.error.message}`);
+        return;
+      }
       await refreshState();
     } catch (e) {
       setProposalError(e instanceof Error ? e.message : String(e));
@@ -111,14 +117,32 @@ export function MultisigPage() {
 
   const approve = async (index: string) => {
     if (!keypair || !msState) return;
-    await approveMultisigProposal(connection, keypair, new PublicKey(msState.multisigPda), BigInt(index));
-    await refreshState();
+    setActionError(null);
+    try {
+      const res = await approveMultisigProposal(connection, keypair, new PublicKey(msState.multisigPda), BigInt(index));
+      if (res.error) {
+        setActionError(`approve #${index} — ${res.error.code}: ${res.error.message}`);
+        return;
+      }
+      await refreshState();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const execute = async (index: string) => {
     if (!keypair || !msState) return;
-    await executeMultisigProposal(connection, keypair, new PublicKey(msState.multisigPda), BigInt(index));
-    await refreshState();
+    setActionError(null);
+    try {
+      const res = await executeMultisigProposal(connection, keypair, new PublicKey(msState.multisigPda), BigInt(index));
+      if (res.error) {
+        setActionError(`execute #${index} — ${res.error.code}: ${res.error.message}`);
+        return;
+      }
+      await refreshState();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -132,8 +156,8 @@ export function MultisigPage() {
       <Card className="space-y-3">
         <h3 className="text-sm font-semibold text-zinc-300">Create multisig</h3>
         <div>
-          <Label>Member public keys (one per line)</Label>
-          <textarea
+          <Label htmlFor="multisigpage-member-public-keys">Member public keys (one per line)</Label>
+          <textarea id="multisigpage-member-public-keys"
             rows={4}
             value={membersText}
             onChange={(e) => setMembersText(e.target.value)}
@@ -141,8 +165,8 @@ export function MultisigPage() {
           />
         </div>
         <div className="w-32">
-          <Label>Threshold</Label>
-          <Input value={threshold} onChange={(e) => setThreshold(e.target.value)} />
+          <Label htmlFor="multisigpage-threshold">Threshold</Label>
+          <Input id="multisigpage-threshold" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
         </div>
         {isMainnet && (
           <label className="flex items-center gap-2 text-sm text-amber-300">
@@ -172,6 +196,7 @@ export function MultisigPage() {
         <h3 className="text-sm font-semibold text-zinc-300">Inspect multisig</h3>
         <div className="flex gap-2">
           <Input
+            aria-label="Multisig PDA address"
             value={multisigAddress}
             onChange={(e) => setMultisigAddress(e.target.value)}
             placeholder="multisig PDA address"
@@ -183,7 +208,7 @@ export function MultisigPage() {
         {lookupError && <div className="text-sm text-red-400">{lookupError}</div>}
         {msState && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
                 <div className="text-xs uppercase text-zinc-500">Threshold</div>
                 <div>
@@ -194,7 +219,7 @@ export function MultisigPage() {
                 <div className="text-xs uppercase text-zinc-500">Vault (index 0)</div>
                 <div className="font-mono text-xs">{msState.vault0Pda}</div>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <div className="text-xs uppercase text-zinc-500">Members</div>
                 <ul className="font-mono text-xs text-zinc-400">
                   {msState.members.map((m) => (
@@ -206,13 +231,14 @@ export function MultisigPage() {
 
             <div className="space-y-2 border-t border-zinc-800 pt-3">
               <Label>New proposal — vault SOL transfer</Label>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
+                  aria-label="Proposal destination"
                   placeholder="destination"
                   value={propDestination}
                   onChange={(e) => setPropDestination(e.target.value)}
                 />
-                <Input placeholder="SOL amount" value={propAmount} onChange={(e) => setPropAmount(e.target.value)} />
+                <Input aria-label="Proposal SOL amount" placeholder="SOL amount" value={propAmount} onChange={(e) => setPropAmount(e.target.value)} />
                 <Button variant="primary" disabled={proposalBusy || !keypair} onClick={propose}>
                   {proposalBusy ? "…" : "Propose"}
                 </Button>
@@ -222,6 +248,7 @@ export function MultisigPage() {
 
             <div className="space-y-2 border-t border-zinc-800 pt-3">
               <Label>Proposals</Label>
+              {actionError && <div className="text-sm text-red-400">{actionError}</div>}
               {proposals && proposals.proposals.length === 0 && (
                 <div className="text-sm text-zinc-500">No proposals yet.</div>
               )}

@@ -5,6 +5,11 @@ import {
   VersionedTransaction,
   type Connection,
 } from "@solana/web3.js";
+import {
+  getAssociatedTokenAddressSync,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { describe, expect, it, vi } from "vitest";
 
 // ESM named exports are non-configurable — vi.spyOn can't redefine
@@ -19,18 +24,23 @@ import { ClusterConnection } from "../connection/connection.js";
 import {
   BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
   CPI_BATCH_TRANSFER_DISCRIMINANT,
+  CPI_FORWARD_TRANSFER_CHECKED_DATA_BYTES,
+  CPI_FORWARD_TRANSFER_CHECKED_DISCRIMINANT,
   CPI_INITIALIZE_VAULT_DATA_BYTES,
   CPI_INITIALIZE_VAULT_DISCRIMINANT,
   CPI_ITEM_BYTES,
   DEFAULT_DEPLOY_CHUNK_BYTES,
   buildCpiBatchTransferInstruction,
   buildCpiInitializeVaultInstruction,
+  buildForwardTransferCheckedInstruction,
+  cpiTokenTransfer,
   deployCpiProgram,
   executeCpiBatchTransfer,
   findCpiVaultPda,
   findProgramDataAddress,
   initializeCpiVault,
   serializeCpiBatchTransferData,
+  serializeCpiForwardTransferCheckedData,
   serializeCpiInitializeVaultData,
 } from "./cpi.js";
 
@@ -363,11 +373,35 @@ describe("initializeCpiVault", () => {
 describe("deployCpiProgram", () => {
   const elf = Buffer.alloc(DEFAULT_DEPLOY_CHUNK_BYTES + 100, 0xab); // 2 chunks
 
-  it("refuses mainnet-beta", async () => {
-    const { conn } = fakeConn("mainnet-beta");
+  it("refuses mainnet-beta before touching the RPC", async () => {
+    const { conn, fake } = fakeConn("mainnet-beta");
     await expect(
       deployCpiProgram(conn, authority, elf, { policy: { retries: 1 } }),
     ).rejects.toMatchObject({ code: "MAINNET_NOT_ALLOWED" });
+    expect(fake.getMinimumBalanceForRentExemption).not.toHaveBeenCalled();
+    expect(fake.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it("forwards allowMainnet to every send (deploy on mainnet-beta succeeds when acknowledged)", async () => {
+    const { conn, sentTransactions } = fakeConn("mainnet-beta");
+    const result = await deployCpiProgram(conn, authority, elf, {
+      allowMainnet: true,
+      policy: { retries: 1 },
+    });
+    expect(sentTransactions).toHaveLength(5);
+    expect(result.deploySignature).toBe("SIG_4");
+  });
+
+  it("the mainnet guard uses the genesis-hash probe for custom endpoints", async () => {
+    const { conn, fake } = fakeConn();
+    (conn as unknown as { target: { cluster: string } }).target.cluster = "custom";
+    (fake as unknown as { getGenesisHash: unknown }).getGenesisHash = vi
+      .fn()
+      .mockResolvedValue("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d");
+    await expect(
+      deployCpiProgram(conn, authority, elf, { policy: { retries: 1 } }),
+    ).rejects.toMatchObject({ code: "MAINNET_NOT_ALLOWED", message: expect.stringContaining("custom(mainnet-beta)") });
+    expect(fake.sendRawTransaction).not.toHaveBeenCalled();
   });
 
   it("runs create+init → chunked writes → deploy → close", async () => {
@@ -448,5 +482,173 @@ describe("deployCpiProgram", () => {
     await expect(
       deployCpiProgram(conn, authority, Buffer.alloc(0), { policy: { retries: 1 } }),
     ).rejects.toMatchObject({ code: "CPI_DEPLOY_EMPTY_PROGRAM" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forward_transfer_checked (PRD T-I)
+// ---------------------------------------------------------------------------
+
+describe("serializeCpiForwardTransferCheckedData", () => {
+  it("produces the exact documented binary layout", () => {
+    const data = serializeCpiForwardTransferCheckedData(1_234_567n, 6);
+    expect(data.length).toBe(CPI_FORWARD_TRANSFER_CHECKED_DATA_BYTES);
+    expect(data.readUInt8(0)).toBe(CPI_FORWARD_TRANSFER_CHECKED_DISCRIMINANT);
+    expect(data.readBigUInt64LE(1)).toBe(1_234_567n);
+    expect(data.readUInt8(9)).toBe(6);
+  });
+
+  it("rejects negative / oversized amounts and bad decimals", () => {
+    expect(() => serializeCpiForwardTransferCheckedData(-1, 0)).toThrow(
+      expect.objectContaining({ code: "CPI_FORWARD_INVALID_AMOUNT" }),
+    );
+    expect(() => serializeCpiForwardTransferCheckedData(1n << 64n, 0)).toThrow(
+      expect.objectContaining({ code: "CPI_FORWARD_INVALID_AMOUNT" }),
+    );
+    expect(() => serializeCpiForwardTransferCheckedData(1, 256)).toThrow(
+      expect.objectContaining({ code: "CPI_FORWARD_INVALID_DECIMALS" }),
+    );
+  });
+});
+
+describe("buildForwardTransferCheckedInstruction", () => {
+  const mint = Keypair.generate().publicKey;
+  const source = Keypair.generate().publicKey;
+  const destination = Keypair.generate().publicKey;
+
+  it("lays out [authority(s), source(w), mint, destination(w), tokenProgram] + extras", () => {
+    const hook = Keypair.generate().publicKey;
+    const ix = buildForwardTransferCheckedInstruction({
+      programId,
+      authority: authority.publicKey,
+      source,
+      mint,
+      destination,
+      tokenProgramId: TOKEN_2022_PROGRAM_ID,
+      amount: 5,
+      decimals: 2,
+      extraAccounts: [{ pubkey: hook, isWritable: true }],
+    });
+    expect(ix.programId.equals(programId)).toBe(true);
+    expect(ix.keys).toEqual([
+      { pubkey: authority.publicKey, isSigner: true, isWritable: false },
+      { pubkey: source, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: hook, isSigner: false, isWritable: true },
+    ]);
+    expect(Buffer.from(ix.data).readUInt8(0)).toBe(CPI_FORWARD_TRANSFER_CHECKED_DISCRIMINANT);
+    expect(Buffer.from(ix.data).readBigUInt64LE(1)).toBe(5n);
+  });
+});
+
+describe("cpiTokenTransfer", () => {
+  const mint = Keypair.generate().publicKey;
+  const destOwner = Keypair.generate().publicKey;
+
+  function withMint(conn: ReturnType<typeof fakeConn>, owner: PublicKey, destAtaExists: boolean) {
+    const destAta = getAssociatedTokenAddressSync(mint, destOwner, true, owner);
+    conn.fake.getAccountInfo = vi.fn().mockImplementation((addr: PublicKey) => {
+      if (addr.equals(mint)) return Promise.resolve({ owner, data: Buffer.alloc(82) });
+      if (destAtaExists && addr.equals(destAta)) {
+        return Promise.resolve({ owner, data: Buffer.alloc(165) });
+      }
+      return Promise.resolve(null);
+    });
+    return destAta;
+  }
+
+  it("dryRun: resolves the token program, prepends idempotent ATA create, simulates only", async () => {
+    const c = fakeConn();
+    const destAta = withMint(c, TOKEN_PROGRAM_ID, false);
+    const res = await cpiTokenTransfer(c.conn, {
+      programId,
+      from: authority,
+      destination: destOwner,
+      mint,
+      amount: 1_000n,
+      decimals: 6,
+      dryRun: true,
+    });
+    expect(res.simulatedOnly).toBe(true);
+    expect(res.signature).toBe("");
+    expect(res.error).toBeUndefined();
+    expect(res.program).toBe("spl-token");
+    expect(res.destinationAtaCreated).toBe(true);
+    expect(res.destinationAta).toBe(destAta.toBase58());
+    expect(res.sourceAta).toBe(
+      getAssociatedTokenAddressSync(mint, authority.publicKey, true, TOKEN_PROGRAM_ID).toBase58(),
+    );
+    expect(res.amount).toBe(1_000n);
+    expect(res.logs).toEqual(["Program log: Simulated ok"]);
+    expect(res.plan.instructions.map((i) => i.label)).toEqual([
+      "createAssociatedTokenAccountIdempotent",
+      "cpiForwardTransferChecked",
+    ]);
+    expect(res.plan.instructions[1]!.programId).toBe(programId.toBase58());
+    expect(res.plan.instructions[1]!.accounts[4]!.pubkey).toBe(TOKEN_PROGRAM_ID.toBase58());
+    expect(c.sentTransactions).toHaveLength(0);
+    expect(c.fake.simulateTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips ATA creation when the destination ATA exists and uses Token-2022 for 2022 mints", async () => {
+    const c = fakeConn();
+    withMint(c, TOKEN_2022_PROGRAM_ID, true);
+    const res = await cpiTokenTransfer(c.conn, {
+      programId,
+      from: authority,
+      destination: destOwner,
+      mint,
+      amount: 7,
+      decimals: 0,
+      policy: { retries: 1 },
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.program).toBe("token-2022");
+    expect(res.destinationAtaCreated).toBe(false);
+    expect(res.plan.instructions).toHaveLength(1);
+    expect(res.signature).toBe("SIG_1");
+    expect(res.slot).toBe(42);
+    const [tx] = sentMessages(c.sentTransactions);
+    const ix = tx!.message.compiledInstructions[0]!;
+    const keys = tx!.message.staticAccountKeys;
+    expect(keys[ix.accountKeyIndexes[4]!]!.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+  });
+
+  it("refuses a missing destination ATA when allowAtaCreation is false", async () => {
+    const c = fakeConn();
+    withMint(c, TOKEN_PROGRAM_ID, false);
+    await expect(
+      cpiTokenTransfer(c.conn, {
+        programId,
+        from: authority,
+        destination: destOwner,
+        mint,
+        amount: 1,
+        decimals: 0,
+        allowAtaCreation: false,
+      }),
+    ).rejects.toMatchObject({ code: "DESTINATION_ATA_MISSING" });
+  });
+
+  it("dryRun with a failing simulation returns the parsed error in-band", async () => {
+    const c = fakeConn();
+    withMint(c, TOKEN_PROGRAM_ID, true);
+    c.fake.simulateTransaction.mockResolvedValueOnce({
+      value: { err: { InstructionError: [0, { Custom: 8 }] }, logs: ["Program log: bad token program"], unitsConsumed: 1 },
+    });
+    const res = await cpiTokenTransfer(c.conn, {
+      programId,
+      from: authority,
+      destination: destOwner,
+      mint,
+      amount: 1,
+      decimals: 0,
+      dryRun: true,
+    });
+    expect(res.simulatedOnly).toBe(true);
+    expect(res.error).toBeDefined();
+    expect(res.logs).toContain("Program log: bad token program");
   });
 });

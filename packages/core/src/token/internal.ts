@@ -2,6 +2,7 @@
  * Internal helpers shared by token creation (task #8) and Token-2022
  * runtime management (task #9): shared send pipeline + program guards.
  */
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   Keypair,
   PublicKey,
@@ -15,6 +16,20 @@ import { SolwalletError, TransactionSendError } from "../connection/errors.js";
 import { parseTransactionError, type ParsedProgramError } from "../utils/parse-error.js";
 import { dryRun } from "../transfer/dryrun.js";
 import { getMintProgram } from "../transfer/program.js";
+
+/**
+ * The token program these instructions talk to, when exactly one of SPL
+ * Token / Token-2022 appears — lets parseTransactionError name custom errors.
+ */
+function tokenProgramOf(instructions: readonly TransactionInstruction[]): PublicKey | undefined {
+  const ids = new Set(
+    instructions
+      .map((ix) => ix.programId)
+      .filter((id) => id.equals(TOKEN_PROGRAM_ID) || id.equals(TOKEN_2022_PROGRAM_ID))
+      .map((id) => id.toBase58()),
+  );
+  return ids.size === 1 ? new PublicKey([...ids][0]!) : undefined;
+}
 
 export interface SendTokenOptions {
   /** Simulate only — nothing is sent on chain. */
@@ -50,7 +65,7 @@ export async function signAndSendTokenTx(
   instructions: TransactionInstruction[],
   opts: SendTokenOptions & { extraSigners?: Keypair[] } = {},
 ): Promise<TokenTxResult> {
-  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
   const message = new TransactionMessage({
     payerKey: from.publicKey,
     recentBlockhash: blockhash,
@@ -58,6 +73,7 @@ export async function signAndSendTokenTx(
   }).compileToV0Message();
   const tx = new VersionedTransaction(message);
   tx.sign([from, ...(opts.extraSigners ?? [])]);
+  const parseOpts = { programId: tokenProgramOf(instructions) };
 
   if (opts.dryRun) {
     const sim = await dryRun(conn, tx);
@@ -74,13 +90,14 @@ export async function signAndSendTokenTx(
         message: `Transaction simulation failed: ${JSON.stringify(sim.err)}`,
         logs: sim.logs,
       };
-      return { ...base, error: parseTransactionError(simErr) };
+      return { ...base, error: parseTransactionError(simErr, parseOpts) };
     }
     return base;
   }
 
   try {
     const sent = await conn.sendWithRetry(tx, {
+      lastValidBlockHeight,
       allowMainnet: opts.allowMainnet,
       policy: opts.policy,
     });
@@ -97,7 +114,7 @@ export async function signAndSendTokenTx(
       slot: 0,
       feeLamports: 0,
       simulatedOnly: false,
-      error: parseTransactionError(error),
+      error: parseTransactionError(error, parseOpts),
     };
   }
 }

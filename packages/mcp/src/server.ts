@@ -5,11 +5,14 @@
  * connections); cli.ts uses the default production wiring.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { parseTransactionError } from "@solwallet/core";
-import { z } from "zod";
+import { parseTransactionError, type ParsedProgramError } from "@solwallet/core";
+import { z, ZodError } from "zod";
 
 import { makeSanitizer } from "./output.js";
+import { registerCpiTools } from "./tools/cpi.js";
+import { registerInspectTools } from "./tools/inspect.js";
 import { registerMultisigTools } from "./tools/multisig.js";
+import { registerRawTools } from "./tools/raw.js";
 import { registerTokenTools } from "./tools/token.js";
 import { registerTransferTools } from "./tools/transfer.js";
 import { registerWalletTools } from "./tools/wallet.js";
@@ -48,16 +51,15 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
         const text = opts?.bypassSanitizer
           ? JSON.stringify(result, null, 2)
           : sanitize(result);
-        return { content: [{ type: "text", text }] };
+        // Tools that report failure in-band (core result objects with an
+        // `error`, or `ok: false`) must flag isError so clients don't treat
+        // the payload as success. Content is passed through unchanged.
+        return { content: [{ type: "text", text }], ...(isFailureResult(result) ? { isError: true } : {}) };
       } catch (error) {
-        const parsed = parseTransactionError(error);
-        const payload = {
-          error: {
-            code: parsed.code,
-            message: parsed.message,
-            suggestion: parsed.suggestion,
-          },
-        };
+        // Spread the whole ParsedProgramError: `custom` (decoded on-chain
+        // code / Token enum name) and any future structured field must
+        // survive, not just the three headline strings.
+        const payload = { error: { ...classifyError(error) } };
         return {
           isError: true,
           content: [{ type: "text", text: sanitize(payload) }],
@@ -71,6 +73,64 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
   registerTransferTools(server, deps, z);
   registerTokenTools(server, deps, z);
   registerMultisigTools(server, deps, z);
+  // PRD T-D: raw transaction channel (sign / simulate / send hex payloads).
+  registerRawTools(server, deps, z);
+  // PRD T-A / T-E: derive_address, inspect_mint, inspect_token_account, inspect_transaction.
+  registerInspectTools(server, deps, z);
+  // PRD T-I: cpi_token_transfer (TransferChecked as an inner instruction via solwallet_cpi).
+  registerCpiTools(server, deps, z);
 
   return server;
 }
+
+/** A tool result whose shape says "this failed" even though nothing threw. */
+function isFailureResult(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  const r = result as { error?: unknown; ok?: unknown };
+  return r.error !== undefined || r.ok === false;
+}
+
+/**
+ * Caller-input mistakes (bad address, unknown wallet, malformed amount,
+ * schema violations…) are not transaction failures: parseTransactionError
+ * would file them under UNKNOWN with an "inspect the explorer" suggestion,
+ * which sends the client in the wrong direction. Map them to INVALID_INPUT
+ * with a parameter-oriented suggestion instead; everything else keeps the
+ * core classification (and its suggestion).
+ */
+const INPUT_ERROR_PATTERNS: RegExp[] = [
+  /Unknown wallet/i,
+  /already exists/i,
+  /Invalid public key/i,
+  /Non-base58/i,
+  /decimals/i,
+  /BigInt/i,
+  /base[- ]unit/i,
+  /^Missing params\./i,
+  /^Provide exactly one of/i,
+  /is required for token/i,
+  /only valid for token/i,
+  /token legs? (must|require)/i,
+];
+
+function classifyError(error: unknown): ParsedProgramError {
+  if (error instanceof ZodError) {
+    return {
+      code: "INVALID_INPUT",
+      message: error.issues
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; "),
+      suggestion: INVALID_INPUT_SUGGESTION,
+    };
+  }
+  const parsed = parseTransactionError(error);
+  if (parsed.code !== "UNKNOWN") return parsed;
+  const message = error instanceof Error ? error.message : String(error);
+  if (INPUT_ERROR_PATTERNS.some((re) => re.test(message))) {
+    return { code: "INVALID_INPUT", message, suggestion: INVALID_INPUT_SUGGESTION };
+  }
+  return parsed;
+}
+
+const INVALID_INPUT_SUGGESTION =
+  "Check the tool arguments: wallet names (list_wallets), base58 addresses, mint + decimals for token legs, and amount formats (human-readable for transfers; integer base-unit strings for create_token/manage_token2022 amounts and fees). Nothing was sent on-chain.";

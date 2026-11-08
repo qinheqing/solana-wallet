@@ -1,6 +1,7 @@
 import type { EncryptedKeystoreV1 } from "@solwallet/core";
 
-export type ClusterName = "mainnet-beta" | "devnet" | "testnet" | "custom";
+/** `localnet` = a solana-test-validator proxied by the dev server at /rpc (+ /rpc-ws). */
+export type ClusterName = "mainnet-beta" | "devnet" | "testnet" | "localnet" | "custom";
 
 /** 64-byte solana-keygen secret-key array. */
 export type KeypairBytes = number[];

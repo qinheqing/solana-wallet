@@ -16,12 +16,20 @@
  *   batch_transfer instruction data : u8 discriminant (1) | u16 LE count | count × (32B pubkey + u64 LE lamports)
  *   batch_transfer accounts         : [authority(signer,writable), vault(writable), systemProgram(readonly), recipient × count (writable)]
  *
+ *   forward_transfer_checked instruction data : u8 discriminant (2) | u64 LE amount | u8 decimals
+ *   forward_transfer_checked accounts         : [authority(signer), source(writable), mint(readonly), destination(writable), tokenProgram(readonly), extras…]
+ *   (PRD T-I — the program CPIs TransferChecked so the token movement shows
+ *   up as an *inner* instruction; `cpiTokenTransfer` is the high-level entry.)
+ *
  * `deployCpiProgram` implements the full BPFLoaderUpgradeable flow
  * (create buffer → InitializeBuffer → chunked Write → DeployWithMaxDataLen →
  * Close buffer) with raw instructions, mirroring `solana program deploy`.
  */
-import { readFile } from "node:fs/promises";
 
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import {
   Keypair,
   PublicKey,
@@ -37,6 +45,8 @@ import type { ClusterConnection, ConfirmPolicy } from "../connection/connection.
 import { MainnetNotAllowedError, SolwalletError, TransactionSendError } from "../connection/errors.js";
 import { parseTransactionError, type ParsedProgramError } from "../utils/parse-error.js";
 import { dryRun } from "./dryrun.js";
+import { planFromInstructions, type TransactionPlan } from "./plan.js";
+import { getMintProgram, type TokenProgramKind } from "./program.js";
 
 // ---------------------------------------------------------------------------
 // Program wire-format constants (must match packages/cpi-program/src/lib.rs)
@@ -51,6 +61,10 @@ export const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
 export const CPI_INITIALIZE_VAULT_DISCRIMINANT = 0;
 /** Discriminant byte of the program's `batch_transfer` instruction. */
 export const CPI_BATCH_TRANSFER_DISCRIMINANT = 1;
+/** Discriminant byte of the program's `forward_transfer_checked` instruction (PRD T-I). */
+export const CPI_FORWARD_TRANSFER_CHECKED_DISCRIMINANT = 2;
+/** `forward_transfer_checked` instruction-data size (disc + u64 amount + u8 decimals). */
+export const CPI_FORWARD_TRANSFER_CHECKED_DATA_BYTES = 1 + 8 + 1;
 
 /** PDA seed of the program's SOL vault. */
 export const CPI_VAULT_SEED = Buffer.from("vault");
@@ -252,7 +266,7 @@ export async function executeCpiBatchTransfer(
     from.publicKey,
     recipients,
   );
-  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
   const message = new TransactionMessage({
     payerKey: from.publicKey,
     recentBlockhash: blockhash,
@@ -289,6 +303,7 @@ export async function executeCpiBatchTransfer(
 
   try {
     const sent = await conn.sendWithRetry(tx, {
+      lastValidBlockHeight,
       allowMainnet: opts.allowMainnet,
       policy: opts.policy,
     });
@@ -368,7 +383,7 @@ export async function initializeCpiVault(
     payer.publicKey,
     authority,
   );
-  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
   const message = new TransactionMessage({
     payerKey: payer.publicKey,
     recentBlockhash: blockhash,
@@ -404,6 +419,7 @@ export async function initializeCpiVault(
 
   try {
     const sent = await conn.sendWithRetry(tx, {
+      lastValidBlockHeight,
       allowMainnet: opts.allowMainnet,
       policy: opts.policy,
     });
@@ -424,6 +440,252 @@ export async function initializeCpiVault(
       vault,
       authority: authorityBase58,
       simulatedOnly: false,
+      error: parseTransactionError(error),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// forward_transfer_checked (PRD T-I): token transfer as an inner instruction
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize `forward_transfer_checked` instruction data:
+ * `[discriminant: u8 (2)][amount: u64 LE][decimals: u8]`
+ */
+export function serializeCpiForwardTransferCheckedData(
+  amount: number | bigint,
+  decimals: number,
+): Buffer {
+  const raw = BigInt(amount);
+  if (raw < 0n || raw > 0xffff_ffff_ffff_ffffn) {
+    throw new SolwalletError(`amount must fit an unsigned u64, got ${raw}.`, {
+      code: "CPI_FORWARD_INVALID_AMOUNT",
+    });
+  }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+    throw new SolwalletError(`decimals must be an integer in 0..255, got ${decimals}.`, {
+      code: "CPI_FORWARD_INVALID_DECIMALS",
+    });
+  }
+  const data = Buffer.alloc(CPI_FORWARD_TRANSFER_CHECKED_DATA_BYTES);
+  data.writeUInt8(CPI_FORWARD_TRANSFER_CHECKED_DISCRIMINANT, 0);
+  data.writeBigUInt64LE(raw, 1);
+  data.writeUInt8(decimals, 9);
+  return data;
+}
+
+export interface ForwardTransferCheckedInstructionParams {
+  /** Deployed `solwallet_cpi` program id. */
+  programId: PublicKey;
+  /** Source owner (or delegate) — signs the outer transaction. */
+  authority: PublicKey;
+  /** Source token account (writable). */
+  source: PublicKey;
+  /** Mint of the token being moved (readonly). */
+  mint: PublicKey;
+  /** Destination token account (writable). */
+  destination: PublicKey;
+  /** SPL Token or Token-2022 program id — the on-chain program rejects anything else. */
+  tokenProgramId: PublicKey;
+  amount: number | bigint;
+  decimals: number;
+  /**
+   * Extra accounts appended after the fixed five and passed through verbatim
+   * to the TransferChecked CPI (needed when the mint carries a TransferHook).
+   */
+  extraAccounts?: readonly { pubkey: PublicKey; isSigner?: boolean; isWritable?: boolean }[];
+}
+
+/**
+ * Build the `forward_transfer_checked` instruction.
+ *
+ * Account layout (must match the Rust program): [0] authority (signer),
+ * [1] source token account (writable), [2] mint (readonly), [3] destination
+ * token account (writable), [4] token program (readonly), [5..] extras.
+ * The program CPIs TransferChecked on `tokenProgramId` with `authority` as
+ * the signer — no PDA signing is involved.
+ */
+export function buildForwardTransferCheckedInstruction(
+  params: ForwardTransferCheckedInstructionParams,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: params.programId,
+    keys: [
+      { pubkey: params.authority, isSigner: true, isWritable: false },
+      { pubkey: params.source, isSigner: false, isWritable: true },
+      { pubkey: params.mint, isSigner: false, isWritable: false },
+      { pubkey: params.destination, isSigner: false, isWritable: true },
+      { pubkey: params.tokenProgramId, isSigner: false, isWritable: false },
+      ...(params.extraAccounts ?? []).map((a) => ({
+        pubkey: a.pubkey,
+        isSigner: a.isSigner === true,
+        isWritable: a.isWritable === true,
+      })),
+    ],
+    data: serializeCpiForwardTransferCheckedData(params.amount, params.decimals),
+  });
+}
+
+export interface CpiTokenTransferRequest {
+  /** Deployed `solwallet_cpi` program id (see `deployCpiProgram`). */
+  programId: PublicKey;
+  /** Source wallet — owns the source ATA, signs and pays fees. */
+  from: Keypair;
+  /** Destination *owner* (wallet address); its ATA is derived here. */
+  destination: PublicKey;
+  mint: PublicKey;
+  /** Base units (already scaled by `decimals`). */
+  amount: number | bigint;
+  decimals: number;
+  /** Create the destination ATA (idempotent) when missing. Default true. */
+  allowAtaCreation?: boolean;
+  /** Pass-through accounts for the TransferChecked CPI (TransferHook mints). */
+  extraAccounts?: ForwardTransferCheckedInstructionParams["extraAccounts"];
+  /** Explicit mainnet confirmation, forwarded to sendWithRetry. */
+  allowMainnet?: boolean;
+  /** Confirm/retry policy override forwarded to sendWithRetry. */
+  policy?: Partial<ConfirmPolicy>;
+  /** Simulate only — nothing is sent on chain. */
+  dryRun?: boolean;
+}
+
+/** Result of a `cpiTokenTransfer` call (sent or simulated); mirrors `TransferResult`. */
+export interface CpiTokenTransferResult {
+  /** Empty for simulated transfers. */
+  signature: string;
+  slot: number;
+  /** Fee in lamports (0 for simulations). */
+  feeLamports: number;
+  /** Token program the mint belongs to (resolved on chain). */
+  program: TokenProgramKind;
+  sourceAta: string;
+  destinationAta: string;
+  /** Destination ATA creation was included in this transaction. */
+  destinationAtaCreated: boolean;
+  /** Base units moved. */
+  amount: bigint;
+  /** True when this was a dry-run simulation — nothing was sent on chain. */
+  simulatedOnly: boolean;
+  /** Populated by dryRun: full simulation logs. */
+  logs?: string[];
+  unitsConsumed?: number;
+  /** Parsed failure — set instead of throwing, for AI-friendly flows. */
+  error?: ParsedProgramError;
+  /** What was compiled: instructions, message hex, signers, blockhash. */
+  plan: TransactionPlan;
+}
+
+/**
+ * Move tokens through the CPI forwarder so the TransferChecked lands as an
+ * *inner* instruction (PRD T-I): resolve the mint's program, derive both
+ * ATAs, optionally prepend an idempotent create for the destination ATA,
+ * then sign and send through sendWithRetry (or simulate with `dryRun`).
+ * Send/simulation failures are returned in-band as `error`, like
+ * `transfer()`.
+ */
+export async function cpiTokenTransfer(
+  conn: ClusterConnection,
+  req: CpiTokenTransferRequest,
+): Promise<CpiTokenTransferResult> {
+  const program = await getMintProgram(conn, req.mint);
+  const sourceAta = getAssociatedTokenAddressSync(
+    req.mint,
+    req.from.publicKey,
+    true,
+    program.programId,
+  );
+  const destinationAta = getAssociatedTokenAddressSync(
+    req.mint,
+    req.destination,
+    true,
+    program.programId,
+  );
+
+  const instructions: TransactionInstruction[] = [];
+  const labels: string[] = [];
+  let destinationAtaCreated = false;
+  const destInfo = await conn.connection.getAccountInfo(destinationAta);
+  if (!destInfo) {
+    if (req.allowAtaCreation === false) {
+      throw new SolwalletError(
+        `Destination token account ${destinationAta.toBase58()} does not exist and allowAtaCreation is false.`,
+        {
+          code: "DESTINATION_ATA_MISSING",
+          hint: "Pass allowAtaCreation: true (default) to create it idempotently in the same transaction.",
+        },
+      );
+    }
+    instructions.push(
+      createAssociatedTokenAccountIdempotentInstruction(
+        req.from.publicKey,
+        destinationAta,
+        req.destination,
+        req.mint,
+        program.programId,
+      ),
+    );
+    labels.push("createAssociatedTokenAccountIdempotent");
+    destinationAtaCreated = true;
+  }
+
+  instructions.push(
+    buildForwardTransferCheckedInstruction({
+      programId: req.programId,
+      authority: req.from.publicKey,
+      source: sourceAta,
+      mint: req.mint,
+      destination: destinationAta,
+      tokenProgramId: program.programId,
+      amount: req.amount,
+      decimals: req.decimals,
+      extraAccounts: req.extraAccounts,
+    }),
+  );
+  labels.push("cpiForwardTransferChecked");
+
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
+  const { message, plan } = planFromInstructions(req.from.publicKey, blockhash, instructions, labels);
+  const tx = new VersionedTransaction(message);
+  tx.sign([req.from]);
+
+  const base: CpiTokenTransferResult = {
+    signature: "",
+    slot: 0,
+    feeLamports: 0,
+    program: program.kind,
+    sourceAta: sourceAta.toBase58(),
+    destinationAta: destinationAta.toBase58(),
+    destinationAtaCreated,
+    amount: BigInt(req.amount),
+    simulatedOnly: req.dryRun === true,
+    plan,
+  };
+
+  if (req.dryRun) {
+    const sim = await dryRun(conn, tx);
+    const simulated = { ...base, logs: sim.logs, unitsConsumed: sim.unitsConsumed };
+    if (!sim.ok) {
+      const simErr = {
+        message: `Transaction simulation failed: ${JSON.stringify(sim.err)}`,
+        logs: sim.logs,
+      };
+      return { ...simulated, error: parseTransactionError(simErr) };
+    }
+    return simulated;
+  }
+
+  try {
+    const sent = await conn.sendWithRetry(tx, {
+      lastValidBlockHeight,
+      allowMainnet: req.allowMainnet,
+      policy: req.policy,
+    });
+    return { ...base, signature: sent.signature, slot: sent.slot, feeLamports: sent.feeLamports };
+  } catch (error) {
+    return {
+      ...base,
+      signature: error instanceof TransactionSendError ? (error.signature ?? "") : "",
       error: parseTransactionError(error),
     };
   }
@@ -513,15 +775,20 @@ export async function deployCpiProgram(
   soBytesOrPath: Buffer | Uint8Array | string,
   opts: DeployCpiProgramOptions = {},
 ): Promise<DeployCpiProgramResult> {
-  if (conn.cluster === "mainnet-beta" && !opts.allowMainnet) {
-    throw new MainnetNotAllowedError(conn.cluster, "deploy a BPF program");
+  // Same guard sendWithRetry applies (custom RPCs are probed by genesis
+  // hash), checked up front so no rent lookups or buffer writes happen first.
+  if (!opts.allowMainnet && (await conn.isMainnet())) {
+    throw new MainnetNotAllowedError(
+      conn.cluster === "custom" ? "custom(mainnet-beta)" : conn.cluster,
+      "deploy a BPF program",
+    );
   }
 
   const programBytes = Buffer.isBuffer(soBytesOrPath)
     ? soBytesOrPath
     : Buffer.from(
         typeof soBytesOrPath === "string"
-          ? await readFile(soBytesOrPath)
+          ? await (await import("node:fs/promises")).readFile(soBytesOrPath) // lazy: keeps core browser-safe
           : soBytesOrPath,
       );
   if (programBytes.length === 0) {
@@ -548,7 +815,7 @@ export async function deployCpiProgram(
     instructions: readonly TransactionInstruction[],
     signers: readonly Keypair[],
   ): Promise<string> => {
-    const { blockhash } = await rpc.getLatestBlockhash("confirmed");
+    const { blockhash, lastValidBlockHeight } = await rpc.getLatestBlockhash("confirmed");
     const message = new TransactionMessage({
       payerKey: payer.publicKey,
       recentBlockhash: blockhash,
@@ -556,7 +823,13 @@ export async function deployCpiProgram(
     }).compileToV0Message();
     const tx = new VersionedTransaction(message);
     tx.sign([...signers]);
-    return (await conn.sendWithRetry(tx, { policy: opts.policy })).signature;
+    return (
+      await conn.sendWithRetry(tx, {
+        policy: opts.policy,
+        allowMainnet: opts.allowMainnet,
+        lastValidBlockHeight,
+      })
+    ).signature;
   };
 
   // 1. Create + initialize the buffer account.

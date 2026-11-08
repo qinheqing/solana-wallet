@@ -3,6 +3,7 @@ import { Button } from "../../components/ui";
 import { WalletList } from "./WalletList";
 import { GenerateWalletFlow } from "./GenerateWalletFlow";
 import { ImportWalletFlow } from "./ImportWalletFlow";
+import { AddressToolsCard } from "./AddressToolsCard";
 
 type Tab = "list" | "generate" | "import";
 
@@ -24,7 +25,12 @@ export function WalletPage() {
         </Button>
       </div>
 
-      {tab === "list" && <WalletList />}
+      {tab === "list" && (
+        <>
+          <WalletList />
+          <AddressToolsCard />
+        </>
+      )}
       {tab === "generate" && <GenerateWalletFlow onDone={() => setTab("list")} />}
       {tab === "import" && <ImportWalletFlow onDone={() => setTab("list")} />}
     </div>

@@ -244,8 +244,9 @@ describe("executeBatchTransfer (6.3, 6.5)", () => {
 
     expect(batches.length).toBe(6);
     expect(fake.sendRawTransaction).toHaveBeenCalledTimes(6);
-    // 2 per batch: message build + sendWithRetry's confirmTransaction strategy.
-    expect(fake.getLatestBlockhash).toHaveBeenCalledTimes(12);
+    // 1 per batch: the blockhash (+ its lastValidBlockHeight) fetched for the
+    // message is the one confirmation is judged against — never a fresh one.
+    expect(fake.getLatestBlockhash).toHaveBeenCalledTimes(6);
     // Per-call signatures prove ordering: batch i got SIG_i+1.
     batches.forEach((b, i) => {
       expect(b.signatures).toEqual([`SIG_${i + 1}`]);

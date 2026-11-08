@@ -235,7 +235,7 @@ async function sendInstructions(
   opts: MultisigSendOptions,
   lookupTableAccounts?: AddressLookupTableAccount[],
 ): Promise<MultisigTxResult> {
-  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
   const message = new TransactionMessage({
     payerKey: signer.publicKey,
     recentBlockhash: blockhash,
@@ -268,6 +268,7 @@ async function sendInstructions(
 
   try {
     const sent = await conn.sendWithRetry(tx, {
+      lastValidBlockHeight,
       allowMainnet: opts.allowMainnet,
       policy: opts.policy,
     });
@@ -392,7 +393,7 @@ export async function createMultisig(
     memo: opts.memo,
   });
 
-  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
   const message = new TransactionMessage({
     payerKey: creator.publicKey,
     recentBlockhash: blockhash,
@@ -425,6 +426,7 @@ export async function createMultisig(
     }
     try {
       const sent = await conn.sendWithRetry(tx, {
+        lastValidBlockHeight,
         allowMainnet: opts.allowMainnet,
         policy: opts.policy,
       });

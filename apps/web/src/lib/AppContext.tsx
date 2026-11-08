@@ -102,6 +102,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.cluster, state.customRpcUrl, state.currentWalletId]);
 
   const connection = useMemo(() => {
+    if (state.cluster === "localnet") {
+      // Same-origin proxy (see vite.config.ts); websocket must be explicit
+      // because web3.js would otherwise guess "port + 1".
+      const origin = window.location.origin;
+      return createConnection(`${origin}/rpc`, {
+        allowMainnet: state.mainnetAck,
+        wsEndpoint: `${origin.replace(/^http/, "ws")}/rpc-ws`,
+      });
+    }
     const target = state.cluster === "custom" ? state.customRpcUrl || "devnet" : state.cluster;
     try {
       return createConnection(target, { allowMainnet: state.mainnetAck });

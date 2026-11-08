@@ -1,11 +1,13 @@
 import { useState } from "react";
 import {
+  TOKEN_PRESETS,
   createSplToken,
   createToken2022,
   mintTokens,
   parseAmount,
   parseTransactionError,
   type CreateTokenResult,
+  type TokenPresetName,
 } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
 import { Button, Card, Input, Label } from "../../components/ui";
@@ -20,12 +22,41 @@ import {
 
 type MintKind = "spl" | "token2022";
 
+/** Fill the form from a TOKEN_PRESETS entry (payer-dependent defaults use the unlocked wallet). */
+function presetToForm(
+  name: TokenPresetName,
+  payer: string,
+): { kind: MintKind; decimals: string; ext: ExtensionFormState; notes: string[] } {
+  const preset = TOKEN_PRESETS[name];
+  const d = preset.defaults.extensions ?? {};
+  const ext = makeDefaultExtensionFormState();
+  if (d.transferFeeConfig) {
+    ext.transferFee = {
+      enabled: true,
+      feeBps: String(d.transferFeeConfig.transferFeeBasisPoints),
+      maxFee: String(d.transferFeeConfig.maximumFee),
+    };
+  }
+  if (d.permanentDelegate) ext.permanentDelegate = { enabled: true, delegate: payer };
+  if (d.scaledUiAmount) ext.scaledUiAmount = { enabled: true, multiplier: String(d.scaledUiAmount.multiplier) };
+  // transfer-hook: the preset's placeholder is the zero pubkey — leave the field for the user to fill.
+  if (d.transferHook) ext.transferHook = { enabled: true, programId: "" };
+  return {
+    kind: preset.program === "spl-token" ? "spl" : "token2022",
+    decimals: String(preset.defaults.decimals ?? 9),
+    ext,
+    notes: preset.notes,
+  };
+}
+
 export function TokenCreatePage() {
   const { connection, state } = useApp();
   const keypair = state.unlockedKeypair;
   const isMainnet = state.cluster === "mainnet-beta";
 
   const [kind, setKind] = useState<MintKind>("spl");
+  const [preset, setPreset] = useState<TokenPresetName | "">("");
+  const [presetNotes, setPresetNotes] = useState<string[]>([]);
   const [decimals, setDecimals] = useState("9");
   const [initialSupply, setInitialSupply] = useState("0");
   const [extForm, setExtForm] = useState<ExtensionFormState>(makeDefaultExtensionFormState());
@@ -37,6 +68,19 @@ export function TokenCreatePage() {
   const [confirming, setConfirming] = useState(false);
 
   const { extensions, summary } = kind === "token2022" ? buildToken2022Extensions(extForm) : { extensions: undefined, summary: [] };
+
+  const applyPreset = (name: TokenPresetName | "") => {
+    setPreset(name);
+    if (!name) {
+      setPresetNotes([]);
+      return;
+    }
+    const filled = presetToForm(name, keypair?.publicKey.toBase58() ?? "");
+    setKind(filled.kind);
+    setDecimals(filled.decimals);
+    setExtForm(filled.ext);
+    setPresetNotes(filled.notes);
+  };
 
   const doCreate = async () => {
     setError(null);
@@ -58,16 +102,34 @@ export function TokenCreatePage() {
           ? await createSplToken(connection, keypair, opts)
           : await createToken2022(connection, keypair, { ...opts, extensions });
 
+      // core reports failures via result.error instead of throwing; the
+      // returned mint does not exist on-chain in that case.
+      if (result.error) {
+        setOutcome({ error: result.error });
+        return;
+      }
+
       let minted: string | undefined;
       const supply = parseAmount(initialSupply || "0", dec);
       if (supply > 0n) {
         const mintRes = await mintTokens(connection, keypair, result.mint, keypair.publicKey, supply, {
           allowMainnet: isMainnet ? mainnetAck : undefined,
         });
+        if (mintRes.error) {
+          // The mint itself was created; surface that so the user can retry minting manually.
+          setCreated({ ...result });
+          setOutcome({ error: mintRes.error });
+          return;
+        }
         minted = mintRes.signature;
       }
       setCreated({ ...result, minted });
-      setOutcome({ signature: result.signature, slot: result.slot, feeLamports: result.feeLamports });
+      setOutcome({
+        signature: result.signature,
+        slot: result.slot,
+        feeLamports: result.feeLamports,
+        simulatedOnly: result.simulatedOnly,
+      });
     } catch (e) {
       setOutcome({ error: parseTransactionError(e) });
     } finally {
@@ -86,6 +148,29 @@ export function TokenCreatePage() {
   return (
     <Card className="space-y-3">
       <h3 className="text-sm font-semibold text-zinc-300">Create a new mint</h3>
+      <div>
+        <Label htmlFor="tokencreatepage-preset">快速模板 (quick preset — fills the form, every field stays editable)</Label>
+        <select
+          id="tokencreatepage-preset"
+          className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100"
+          value={preset}
+          onChange={(e) => applyPreset(e.target.value as TokenPresetName | "")}
+        >
+          <option value="">— custom —</option>
+          {(Object.keys(TOKEN_PRESETS) as TokenPresetName[]).map((name) => (
+            <option key={name} value={name}>
+              {name} — {TOKEN_PRESETS[name].description}
+            </option>
+          ))}
+        </select>
+        {presetNotes.length > 0 && (
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-zinc-500">
+            {presetNotes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div className="flex gap-2">
         <Button variant={kind === "spl" ? "primary" : "default"} onClick={() => setKind("spl")}>
           Classic SPL Token
@@ -94,14 +179,14 @@ export function TokenCreatePage() {
           Token-2022
         </Button>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <Label>Decimals</Label>
-          <Input value={decimals} onChange={(e) => setDecimals(e.target.value)} />
+          <Label htmlFor="tokencreatepage-decimals">Decimals</Label>
+          <Input id="tokencreatepage-decimals" value={decimals} onChange={(e) => setDecimals(e.target.value)} />
         </div>
         <div>
-          <Label>Initial supply (minted to yourself)</Label>
-          <Input value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} />
+          <Label htmlFor="tokencreatepage-initial-supply">Initial supply (minted to yourself)</Label>
+          <Input id="tokencreatepage-initial-supply" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} />
         </div>
       </div>
 
@@ -144,8 +229,11 @@ export function TokenCreatePage() {
       {outcome && (
         <div className="space-y-2">
           <ResultView result={outcome} />
-          {created && !outcome.error && (
+          {/* `created` is only set once the mint exists on-chain (creation succeeded);
+              it may coexist with an error from the follow-up initial-supply mint. */}
+          {created && (
             <div className="font-mono text-xs text-zinc-400">
+              {outcome.error && <div className="text-amber-300">Mint was created but minting the initial supply failed.</div>}
               mint: {created.mint}
               {created.extensions.length > 0 && <div>extensions: {created.extensions.join(", ")}</div>}
               {created.minted && <div>minted tx: {created.minted}</div>}

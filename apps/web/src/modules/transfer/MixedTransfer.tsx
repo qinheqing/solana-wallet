@@ -67,8 +67,9 @@ export function MixedTransfer() {
       <Label>Legs (merged into one transaction)</Label>
       <div className="space-y-3">
         {legs.map((leg, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2 rounded-md border border-zinc-800 p-2">
+          <div key={i} className="grid grid-cols-2 gap-2 rounded-md border border-zinc-800 p-2 sm:grid-cols-12">
             <select
+              aria-label={`Leg ${i + 1} kind`}
               value={leg.kind}
               onChange={(e) => update(i, { kind: e.target.value as "sol" | "token" })}
               className="col-span-2 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
@@ -77,7 +78,8 @@ export function MixedTransfer() {
               <option value="token">Token</option>
             </select>
             <Input
-              className="col-span-4"
+              className="col-span-2 sm:col-span-4"
+              aria-label={`Leg ${i + 1} destination`}
               placeholder="destination"
               value={leg.to}
               onChange={(e) => update(i, { to: e.target.value })}
@@ -85,13 +87,15 @@ export function MixedTransfer() {
             {leg.kind === "token" && (
               <>
                 <Input
-                  className="col-span-3"
+                  className="col-span-2 sm:col-span-3"
+                  aria-label={`Leg ${i + 1} mint`}
                   placeholder="mint"
                   value={leg.mint}
                   onChange={(e) => update(i, { mint: e.target.value })}
                 />
                 <Input
-                  className="col-span-1"
+                  className="col-span-2 sm:col-span-1"
+                  aria-label={`Leg ${i + 1} decimals`}
                   placeholder="dec"
                   value={leg.decimals}
                   onChange={(e) => update(i, { decimals: e.target.value })}
@@ -99,14 +103,16 @@ export function MixedTransfer() {
               </>
             )}
             <Input
-              className={leg.kind === "token" ? "col-span-1" : "col-span-5"}
+              className={leg.kind === "token" ? "col-span-2 sm:col-span-1" : "col-span-2 sm:col-span-5"}
+              aria-label={`Leg ${i + 1} amount`}
               placeholder="amount"
               value={leg.amount}
               onChange={(e) => update(i, { amount: e.target.value })}
             />
             <Button
               variant="ghost"
-              className="col-span-1"
+              className="col-span-2 sm:col-span-1"
+              aria-label={`Remove leg ${i + 1}`}
               onClick={() => setLegs((prev) => prev.filter((_, idx) => idx !== i))}
             >
               x

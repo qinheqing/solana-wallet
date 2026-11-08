@@ -34,3 +34,6 @@ test-ledger/
 
 # OS specific
 .DS_Store
+
+# TypeScript incremental build state (composite projects)
+*.tsbuildinfo

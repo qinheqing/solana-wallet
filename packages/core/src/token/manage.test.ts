@@ -6,6 +6,7 @@
  */
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  ExtensionType,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
@@ -15,14 +16,22 @@ import { describe, expect, it, vi } from "vitest";
 import { ClusterConnection } from "../connection/connection.js";
 import {
   burnTokens,
+  disableMemoTransfer,
+  enableMemoTransfer,
   freezeTokenAccount,
+  harvestWithheldToMint,
   mintTokens,
   setFreezeAuthority,
   setMintAuthority,
   setTransferFee,
   thawTokenAccount,
+  updateScaledUiMultiplier,
   updateTokenMetadata,
+  updateTransferHookProgram,
+  withdrawWithheldFromAccounts,
+  withdrawWithheldFromMint,
 } from "./manage.js";
+import { accountBase, ext, token2022AccountInfo } from "../inspect/__fixtures__/accounts.js";
 
 function fakeConn(opts: {
   mintOwner?: PublicKey; // default TOKEN_2022_PROGRAM_ID
@@ -30,7 +39,7 @@ function fakeConn(opts: {
 } = {}) {
   const mint = Keypair.generate().publicKey;
   const mintOwner = opts.mintOwner ?? TOKEN_2022_PROGRAM_ID;
-  const accounts = new Map<string, { owner: PublicKey }>([
+  const accounts = new Map<string, { owner: PublicKey; data?: Buffer }>([
     [mint.toBase58(), { owner: mintOwner }],
   ]);
   for (const ata of opts.existingAtas ?? []) accounts.set(ata, { owner: PublicKey.default });
@@ -40,7 +49,7 @@ function fakeConn(opts: {
     getAccountInfo: vi.fn().mockImplementation((addr: PublicKey) => {
       const hit = accounts.get(addr.toBase58());
       return hit
-        ? Promise.resolve({ owner: hit.owner, data: Buffer.alloc(0) })
+        ? Promise.resolve({ owner: hit.owner, data: hit.data ?? Buffer.alloc(0) })
         : Promise.resolve(null);
     }),
     getLatestBlockhash: vi.fn().mockResolvedValue({
@@ -266,5 +275,179 @@ describe("dryRun support", () => {
     expect(result.signature).toBe("");
     expect(result.logs).toContain("Program log: ok");
     expect(fake.sendRawTransaction).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRD T-F: updateScaledUiMultiplier
+// ---------------------------------------------------------------------------
+
+describe("updateScaledUiMultiplier (T-F)", () => {
+  it("encodes ScaledUiAmountExtension/UpdateMultiplier with f64 multiplier + i64 timestamp", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const result = await updateScaledUiMultiplier(conn, {
+      mint,
+      authority,
+      multiplier: 2.5,
+      effectiveTimestamp: 1_700_000_000,
+    });
+    expect(result.signature).toBe("SIG_MGMT");
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(1);
+    const ix = ixs[0]!;
+    expect(ix.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+    expect(ix.keys[0]!.equals(mint)).toBe(true);
+    expect(ix.keys[1]!.equals(authority.publicKey)).toBe(true);
+    expect(ix.data[0]).toBe(43); // ScaledUiAmountExtension
+    expect(ix.data[1]).toBe(1); // UpdateMultiplier
+    expect(ix.data.readDoubleLE(2)).toBe(2.5);
+    expect(ix.data.readBigInt64LE(10)).toBe(1_700_000_000n);
+  });
+
+  it("defaults effectiveTimestamp to 0 and validates the multiplier / program", async () => {
+    const { conn, txs, mint } = fakeConn();
+    await updateScaledUiMultiplier(conn, { mint, authority, multiplier: 1 });
+    expect(decode(txs[0]!)[0]!.data.readBigInt64LE(10)).toBe(0n);
+    await expect(
+      updateScaledUiMultiplier(conn, { mint, authority, multiplier: -1 }),
+    ).rejects.toMatchObject({ code: "SCALED_UI_MULTIPLIER_INVALID" });
+    const spl = fakeConn({ mintOwner: TOKEN_PROGRAM_ID });
+    await expect(
+      updateScaledUiMultiplier(spl.conn, { mint: spl.mint, authority, multiplier: 1 }),
+    ).rejects.toMatchObject({ code: "TOKEN_PROGRAM_MISMATCH" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRD T-G: account-level extension operations
+// ---------------------------------------------------------------------------
+
+describe("enableMemoTransfer / disableMemoTransfer (T-G)", () => {
+  const ownerKp = Keypair.generate();
+
+  it("missing ATA → createATA + Reallocate(MemoTransfer) + Enable", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const result = await enableMemoTransfer(conn, { owner: ownerKp, mint });
+    expect(result.signature).toBe("SIG_MGMT");
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(3);
+    expect(ixs[0]!.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
+    expect(ixs[1]!.data[0]).toBe(29); // Reallocate
+    expect(ixs[1]!.data.readUInt16LE(1)).toBe(ExtensionType.MemoTransfer);
+    expect(ixs[2]!.data[0]).toBe(30); // MemoTransferExtension
+    expect(ixs[2]!.data[1]).toBe(0); // Enable
+    const ata = getAssociatedTokenAddressSync(mint, ownerKp.publicKey, true, TOKEN_2022_PROGRAM_ID);
+    expect(ixs[2]!.keys[0]!.equals(ata)).toBe(true);
+    expect(ixs[2]!.keys[1]!.equals(ownerKp.publicKey)).toBe(true);
+  });
+
+  it("existing ATA without the extension → Reallocate + Disable", async () => {
+    const { conn, txs, mint, accounts } = fakeConn();
+    const ata = getAssociatedTokenAddressSync(mint, ownerKp.publicKey, true, TOKEN_2022_PROGRAM_ID);
+    const info = token2022AccountInfo(accountBase({ mint, owner: ownerKp.publicKey }), [ext.immutableOwner()]);
+    accounts.set(ata.toBase58(), { owner: TOKEN_2022_PROGRAM_ID, data: info.data });
+    await disableMemoTransfer(conn, { owner: ownerKp, mint });
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(2);
+    expect(ixs[0]!.data[0]).toBe(29); // Reallocate (owner pays)
+    expect(ixs[0]!.keys[1]!.equals(ownerKp.publicKey)).toBe(true);
+    expect(ixs[1]!.data[0]).toBe(30);
+    expect(ixs[1]!.data[1]).toBe(1); // Disable
+  });
+
+  it("ATA that already has MemoTransfer → single Enable instruction, no realloc", async () => {
+    const { conn, txs, mint, accounts } = fakeConn();
+    const ata = getAssociatedTokenAddressSync(mint, ownerKp.publicKey, true, TOKEN_2022_PROGRAM_ID);
+    const info = token2022AccountInfo(accountBase({ mint, owner: ownerKp.publicKey }), [
+      ext.immutableOwner(),
+      ext.memoTransfer(false),
+    ]);
+    accounts.set(ata.toBase58(), { owner: TOKEN_2022_PROGRAM_ID, data: info.data });
+    await enableMemoTransfer(conn, { owner: ownerKp, mint });
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(1);
+    expect(ixs[0]!.data[0]).toBe(30);
+    expect(ixs[0]!.data[1]).toBe(0);
+  });
+
+  it("rejects SPL mints", async () => {
+    const { conn, mint } = fakeConn({ mintOwner: TOKEN_PROGRAM_ID });
+    await expect(enableMemoTransfer(conn, { owner: ownerKp, mint })).rejects.toMatchObject({
+      code: "TOKEN_PROGRAM_MISMATCH",
+    });
+  });
+});
+
+describe("withheld-fee collection (T-G)", () => {
+  it("withdrawWithheldFromAccounts → default destination = authority ATA (created) + ix 26/3 with sources", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const sources = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+    await withdrawWithheldFromAccounts(conn, { mint, authority, sources });
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(2);
+    expect(ixs[0]!.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
+    const ix = ixs[1]!;
+    expect(ix.data[0]).toBe(26); // TransferFeeExtension
+    expect(ix.data[1]).toBe(3); // WithdrawWithheldTokensFromAccounts
+    expect(ix.data[2]).toBe(2); // numTokenAccounts
+    const ata = getAssociatedTokenAddressSync(mint, authority.publicKey, true, TOKEN_2022_PROGRAM_ID);
+    expect(ix.keys[0]!.equals(mint)).toBe(true);
+    expect(ix.keys[1]!.equals(ata)).toBe(true);
+    expect(ix.keys[2]!.equals(authority.publicKey)).toBe(true);
+    expect(ix.keys.slice(3).map((k) => k.toBase58())).toEqual(sources.map((k) => k.toBase58()));
+  });
+
+  it("withdrawWithheldFromAccounts rejects an empty source list", async () => {
+    const { conn, mint } = fakeConn();
+    await expect(
+      withdrawWithheldFromAccounts(conn, { mint, authority, sources: [] }),
+    ).rejects.toMatchObject({ code: "SOURCES_EMPTY" });
+  });
+
+  it("harvestWithheldToMint → single permissionless ix 26/4 (mint + sources)", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const payer = Keypair.generate();
+    const src = Keypair.generate().publicKey;
+    await harvestWithheldToMint(conn, { payer, mint, sources: [src] });
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(1);
+    expect(ixs[0]!.data[0]).toBe(26);
+    expect(ixs[0]!.data[1]).toBe(4);
+    expect(ixs[0]!.keys[0]!.equals(mint)).toBe(true);
+    expect(ixs[0]!.keys[1]!.equals(src)).toBe(true);
+    expect(txs[0]!.message.staticAccountKeys[0]!.equals(payer.publicKey)).toBe(true);
+  });
+
+  it("withdrawWithheldFromMint → explicit destination, ix 26/2, no ATA creation", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const destination = Keypair.generate().publicKey;
+    await withdrawWithheldFromMint(conn, { mint, authority, destination });
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(1);
+    expect(ixs[0]!.data[0]).toBe(26);
+    expect(ixs[0]!.data[1]).toBe(2);
+    expect(ixs[0]!.keys[1]!.equals(destination)).toBe(true);
+    expect(ixs[0]!.keys[2]!.equals(authority.publicKey)).toBe(true);
+  });
+});
+
+describe("updateTransferHookProgram (T-G)", () => {
+  it("encodes TransferHookExtension/Update with the new program id", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const hook = Keypair.generate().publicKey;
+    await updateTransferHookProgram(conn, { mint, authority, programId: hook });
+    const ix = decode(txs[0]!)[0]!;
+    expect(ix.data[0]).toBe(36); // TransferHookExtension
+    expect(ix.data[1]).toBe(1); // Update
+    expect(ix.data.subarray(2, 34)).toEqual(Buffer.from(hook.toBytes()));
+    expect(ix.keys[0]!.equals(mint)).toBe(true);
+    expect(ix.keys[1]!.equals(authority.publicKey)).toBe(true);
+  });
+
+  it("null clears the hook (zero pubkey)", async () => {
+    const { conn, txs, mint } = fakeConn();
+    await updateTransferHookProgram(conn, { mint, authority, programId: null });
+    const ix = decode(txs[0]!)[0]!;
+    expect(ix.data.subarray(2, 34)).toEqual(Buffer.alloc(32));
   });
 });

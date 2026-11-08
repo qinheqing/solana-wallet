@@ -12,7 +12,8 @@ export interface SafeWalletView {
   address: string;
   solUi: number;
   tokenCount: number;
-  tokens: Array<{ mint: string; uiAmount: number | null; program: string }>;
+  /** Raw base-unit amounts only — uiAmount is a display-layer concern. */
+  tokens: Array<{ mint: string; amount: string; decimals: number; program: string }>;
 }
 
 export function toSafeWalletView(balance: WalletBalance): SafeWalletView {
@@ -22,14 +23,15 @@ export function toSafeWalletView(balance: WalletBalance): SafeWalletView {
     tokenCount: balance.tokens.length,
     tokens: balance.tokens.map((t) => ({
       mint: t.mint,
-      uiAmount: t.uiAmount,
+      amount: t.amount,
+      decimals: t.decimals,
       program: t.program,
     })),
   };
 }
 
-/** "EPdc…9xQe" style shortening for logs and tables. */
-export function shortAddress(address: string | PublicKey, lead = 4, trail = 4): string {
+/** "EPdcT7…hxN9" style shortening for logs and tables (6 lead + 4 trail). */
+export function shortAddress(address: string | PublicKey, lead = 6, trail = 4): string {
   const s = typeof address === "string" ? address : address.toBase58();
   if (s.length <= lead + trail + 1) return s;
   return `${s.slice(0, lead)}…${s.slice(-trail)}`;

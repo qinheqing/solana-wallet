@@ -1,4 +1,6 @@
-import { Buffer } from "buffer";
+// Must stay the first import: installs the Buffer global before any
+// module that touches it at top level is evaluated (see polyfills.ts).
+import "./polyfills";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
@@ -11,9 +13,7 @@ import { WalletPage } from "./modules/wallet/WalletPage";
 import { TransferPage } from "./modules/transfer/TransferPage";
 import { TokenPage } from "./modules/token/TokenPage";
 import { MultisigPage } from "./modules/multisig/MultisigPage";
-
-// @solana/web3.js expects a Node-like Buffer global in the browser.
-(globalThis as unknown as { Buffer: typeof Buffer }).Buffer ??= Buffer;
+import { InspectPage } from "./modules/inspect/InspectPage";
 
 export const WEB_VERSION = "0.1.0";
 
@@ -31,6 +31,7 @@ ReactDOM.createRoot(root).render(
             <Route path="/transfer" element={<TransferPage />} />
             <Route path="/token" element={<TokenPage />} />
             <Route path="/multisig" element={<MultisigPage />} />
+            <Route path="/inspect" element={<InspectPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

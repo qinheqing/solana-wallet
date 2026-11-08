@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getWalletBalance, toSafeWalletView, type ClusterHealth, type SafeWalletView, PublicKey } from "../../lib/coreShim";
+import { formatAmount, getWalletBalance, toSafeWalletView, type ClusterHealth, type SafeWalletView, PublicKey } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
 import { Card, ErrorBanner } from "../../components/ui";
 
@@ -83,7 +83,7 @@ export function DashboardPage() {
                     <span>
                       {t.mint.slice(0, 6)}…{t.mint.slice(-6)} ({t.program})
                     </span>
-                    <span>{t.uiAmount ?? "-"}</span>
+                    <span>{formatAmount(BigInt(t.amount), t.decimals)}</span>
                   </li>
                 ))}
               </ul>

@@ -20,9 +20,11 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --project tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run --root ../.. packages/core"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@scure/bip39": "^2.4.0",
     "@solana/spl-token": "^0.4.9",
     "@solana/spl-token-metadata": "^0.1.6",

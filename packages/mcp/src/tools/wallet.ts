@@ -39,19 +39,23 @@ export function registerWalletTools(
           .union([z.literal(128), z.literal(256)])
           .optional()
           .describe("Mnemonic entropy: 128 = 12 words (default), 256 = 24 words."),
+        overwrite: overwriteParam(z),
       },
     },
-    run(async (args: { name?: string; strength?: 128 | 256 }) => {
+    run(async (args: { name?: string; strength?: 128 | 256; overwrite?: boolean }) => {
       const name = args.name ?? autoName(store, "wallet");
       const mnemonic = newMnemonic(args.strength ?? 128);
       const imported = await importFromMnemonic(mnemonic);
-      store.put({
-        name,
-        keypair: imported.keypair,
-        origin: "generated",
-        mnemonic,
-        derivationPath: imported.path,
-      });
+      store.put(
+        {
+          name,
+          keypair: imported.keypair,
+          origin: "generated",
+          mnemonic,
+          derivationPath: imported.path,
+        },
+        { overwrite: args.overwrite },
+      );
       return {
         walletName: name,
         address: imported.address.toBase58(),
@@ -82,6 +86,7 @@ export function registerWalletTools(
           .optional()
           .describe("SLIP-0010 path or preset (solana | phantom | solanaSecond). Default: solana (m/44'/501'/0'/0')."),
         passphrase: z.string().optional().describe("Optional BIP39 passphrase (25th word)."),
+        overwrite: overwriteParam(z),
       },
     },
     run(
@@ -92,6 +97,7 @@ export function registerWalletTools(
           mnemonic?: string;
           derivationPath?: string;
           passphrase?: string;
+          overwrite?: boolean;
         },
       ) => {
         if (Boolean(args.keyfileJson) === Boolean(args.mnemonic)) {
@@ -99,7 +105,7 @@ export function registerWalletTools(
         }
         if (args.keyfileJson) {
           const keypair = parseKeypairJson(args.keyfileJson);
-          store.put({ name: args.name, keypair, origin: "keyfile" });
+          store.put({ name: args.name, keypair, origin: "keyfile" }, { overwrite: args.overwrite });
           return {
             walletName: args.name,
             address: keypair.publicKey.toBase58(),
@@ -110,13 +116,16 @@ export function registerWalletTools(
           path: args.derivationPath,
           passphrase: args.passphrase,
         });
-        store.put({
-          name: args.name,
-          keypair: imported.keypair,
-          origin: "mnemonic",
-          mnemonic: args.mnemonic!,
-          derivationPath: imported.path,
-        });
+        store.put(
+          {
+            name: args.name,
+            keypair: imported.keypair,
+            origin: "mnemonic",
+            mnemonic: args.mnemonic!,
+            derivationPath: imported.path,
+          },
+          { overwrite: args.overwrite },
+        );
         return {
           walletName: args.name,
           address: imported.address.toBase58(),
@@ -248,7 +257,8 @@ export function registerWalletTools(
         cluster: conn.cluster,
         ...toSafeWalletView(balance),
         solLamports: balance.solLamports,
-        tokens: balance.tokens,
+        // Raw base units only: uiAmount is display-layer and never leaves core via MCP.
+        tokens: balance.tokens.map(({ uiAmount: _ui, ...t }) => t),
       };
     }),
   );
@@ -260,6 +270,15 @@ function clusterParam(z: typeof import("zod").z, deps: ToolDeps) {
     .optional()
     .describe(
       `Cluster name (devnet | testnet | mainnet-beta) or RPC URL. Default: ${deps.connections.defaultCluster()} (env SOLWALLET_CLUSTER).`,
+    );
+}
+
+function overwriteParam(z: typeof import("zod").z) {
+  return z
+    .boolean()
+    .optional()
+    .describe(
+      "Replace an already-loaded wallet with the same name. Default false: a name clash is an error so a key is never silently dropped.",
     );
 }
 

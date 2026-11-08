@@ -1,9 +1,14 @@
 import {
+  SendTransactionError,
   SolanaJSONRPCError,
   TransactionExpiredBlockheightExceededError,
 } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIRM_POLICY, shouldRetrySend } from "./connection.js";
+import {
+  DEFAULT_CONFIRM_POLICY,
+  isAlreadyProcessedError,
+  shouldRetrySend,
+} from "./connection.js";
 import { TransactionSendError } from "./errors.js";
 
 const policy = DEFAULT_CONFIRM_POLICY; // retries: 5
@@ -62,5 +67,35 @@ describe("shouldRetrySend (user policy: exponential backoff, 5 retries)", () => 
   it("retries unknown error shapes (default permissive)", () => {
     expect(shouldRetrySend(new Error("mystery"), 1, policy)).toBe(true);
     expect(shouldRetrySend("string error", 1, policy)).toBe(true);
+  });
+});
+
+describe("isAlreadyProcessedError", () => {
+  it("matches the preflight duplicate-send message (plain Error)", () => {
+    expect(
+      isAlreadyProcessedError(
+        new Error(
+          "failed to send transaction: Transaction simulation failed: This transaction has already been processed",
+        ),
+      ),
+    ).toBe(true);
+    expect(isAlreadyProcessedError(new Error("already processed"))).toBe(true);
+    expect(isAlreadyProcessedError(new Error("AlreadyProcessed"))).toBe(true);
+  });
+
+  it("matches web3.js SendTransactionError carrying the message", () => {
+    const err = new SendTransactionError({
+      action: "send",
+      signature: "SIG",
+      transactionMessage: "This transaction has already been processed",
+    });
+    expect(isAlreadyProcessedError(err)).toBe(true);
+  });
+
+  it("ignores unrelated failures and non-errors", () => {
+    expect(isAlreadyProcessedError(new Error("fetch failed"))).toBe(false);
+    expect(isAlreadyProcessedError(new Error("custom program error: 0x1"))).toBe(false);
+    expect(isAlreadyProcessedError(undefined)).toBe(false);
+    expect(isAlreadyProcessedError("blockhash not found")).toBe(false);
   });
 });

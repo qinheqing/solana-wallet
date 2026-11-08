@@ -14,11 +14,60 @@ import {
   setMintAuthority,
   setFreezeAuthority,
   updateTokenMetadata,
+  updateScaledUiMultiplier,
+  enableMemoTransfer,
+  disableMemoTransfer,
+  withdrawWithheldFromAccounts,
+  harvestWithheldToMint,
+  withdrawWithheldFromMint,
+  updateTransferHookProgram,
+  createFromPreset,
   type Token2022ExtensionOptions,
+  type TokenPresetName,
 } from "@solwallet/core";
+import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 
 import type { ToolDeps } from "../types.js";
+
+/** Convert the MCP (string-typed) extension payload into core options. */
+function toCoreExtensions(raw: {
+  transferFeeConfig?: { transferFeeBasisPoints: number; maximumFee: string };
+  transferHook?: { programId: string };
+  interestBearingConfig?: { rate: number };
+  nonTransferable?: boolean;
+  permanentDelegate?: { delegate: string };
+  tokenMetadata?: { name: string; symbol: string; uri: string };
+  defaultAccountState?: { accountState: "frozen" };
+  scaledUiAmount?: { multiplier: number; authority?: string };
+}): Token2022ExtensionOptions {
+  const extensions: Token2022ExtensionOptions = {};
+  if (raw.transferFeeConfig) {
+    extensions.transferFeeConfig = {
+      transferFeeBasisPoints: raw.transferFeeConfig.transferFeeBasisPoints,
+      maximumFee: BigInt(raw.transferFeeConfig.maximumFee),
+    };
+  }
+  if (raw.transferHook) {
+    extensions.transferHook = { programId: new PublicKey(raw.transferHook.programId) };
+  }
+  if (raw.interestBearingConfig) {
+    extensions.interestBearingConfig = { rate: raw.interestBearingConfig.rate };
+  }
+  if (raw.nonTransferable) extensions.nonTransferable = true;
+  if (raw.permanentDelegate) {
+    extensions.permanentDelegate = { delegate: new PublicKey(raw.permanentDelegate.delegate) };
+  }
+  if (raw.tokenMetadata) extensions.tokenMetadata = raw.tokenMetadata;
+  if (raw.defaultAccountState) extensions.defaultAccountState = { accountState: "frozen" };
+  if (raw.scaledUiAmount) {
+    extensions.scaledUiAmount = {
+      multiplier: raw.scaledUiAmount.multiplier,
+      authority: raw.scaledUiAmount.authority ? new PublicKey(raw.scaledUiAmount.authority) : undefined,
+    };
+  }
+  return extensions;
+}
 
 type McpServer = import("@modelcontextprotocol/sdk/server/mcp.js").McpServer;
 
@@ -33,10 +82,26 @@ export function registerTokenTools(
     "create_token",
     {
       description:
-        "Create a new SPL Token or Token-2022 mint. Token-2022 enables extensions: transferFeeConfig, transferHook, interestBearingConfig, nonTransferable, permanentDelegate, tokenMetadata (on-chain name/symbol/uri) and defaultAccountState=frozen. Returns the mint address, signature and enabled extensions.",
+        "Create a new SPL Token or Token-2022 mint. Token-2022 enables extensions: transferFeeConfig, transferHook, interestBearingConfig, nonTransferable, permanentDelegate, tokenMetadata (on-chain name/symbol/uri), defaultAccountState=frozen and scaledUiAmount (display-only multiplier). Optional `preset` fills defaults (plain-2022 | transfer-fee | permanent-delegate | scaled-ui | transfer-hook | legacy-spl | memo-required); explicit fields override preset values. Optional `mintTo` mints an initial amount right after creation. Returns the mint address, signature and enabled extensions.",
       inputSchema: {
         walletName: z.string().describe("Mint authority wallet (loaded); pays creation fees."),
-        decimals: z.number().int().min(0).max(18).describe("Mint decimals."),
+        preset: z
+          .enum(["plain-2022", "transfer-fee", "permanent-delegate", "scaled-ui", "transfer-hook", "legacy-spl", "memo-required"])
+          .optional()
+          .describe(
+            "Quick template supplying tokenProgram/decimals/extensions defaults. Explicit fields override. transfer-fee defaults 0 bps; permanent-delegate defaults the delegate to this wallet; scaled-ui multiplier 1.5; transfer-hook needs extensions.transferHook.programId (else stored as null); memo-required = plain-2022 + call manage_token2022 enableMemoTransfer on recipient ATAs.",
+          ),
+        decimals: z.number().int().min(0).max(18).optional().describe("Mint decimals (required unless a preset is given; preset default 9)."),
+        mintTo: z
+          .object({
+            owner: z.string().describe("Wallet address that receives the initial supply (its ATA is created if missing)."),
+            amount: z
+              .string()
+              .regex(/^\d+$/, "amount must be an integer string in base units")
+              .describe("Initial amount in token base units (integer string, NOT human-readable: \"1000000\" = 1 token at 6 decimals)."),
+          })
+          .optional()
+          .describe("Mint an initial supply in a second transaction right after creation (skipped on dryRun)."),
         tokenProgram: z
           .enum(["spl-token", "token-2022"])
           .optional()
@@ -46,7 +111,10 @@ export function registerTokenTools(
             transferFeeConfig: z
               .object({
                 transferFeeBasisPoints: z.number().int().min(0).max(10000).describe("Fee in basis points (100 = 1%)."),
-                maximumFee: z.string().describe("Maximum fee in token base units (integer string)."),
+                maximumFee: z
+                  .string()
+                  .regex(/^\d+$/, "maximumFee must be an integer string in base units")
+                  .describe("Maximum fee per transfer in token base units (integer string, NOT human-readable: \"1000000\" = 1 token at 6 decimals)."),
               })
               .optional()
               .describe("Transfer fee taken on transfers; updatable later by the authority."),
@@ -78,6 +146,13 @@ export function registerTokenTools(
               .object({ accountState: z.literal("frozen") })
               .optional()
               .describe("New token accounts start FROZEN until thawed by the freeze authority."),
+            scaledUiAmount: z
+              .object({
+                multiplier: z.number().positive().describe("Display multiplier (> 0), e.g. 1.5."),
+                authority: z.string().optional().describe("Authority allowed to update the multiplier (default: this wallet)."),
+              })
+              .optional()
+              .describe("ScaledUiAmount: UIs display raw × multiplier. Display-only — raw amounts in this wallet are never scaled."),
           })
           .optional()
           .describe("Token-2022 extension config (ignored for spl-token)."),
@@ -88,7 +163,9 @@ export function registerTokenTools(
     },
     run(async (args: {
       walletName: string;
-      decimals: number;
+      preset?: TokenPresetName;
+      decimals?: number;
+      mintTo?: { owner: string; amount: string };
       tokenProgram?: "spl-token" | "token-2022";
       extensions?: {
         transferFeeConfig?: { transferFeeBasisPoints: number; maximumFee: string };
@@ -98,6 +175,7 @@ export function registerTokenTools(
         permanentDelegate?: { delegate: string };
         tokenMetadata?: { name: string; symbol: string; uri: string };
         defaultAccountState?: { accountState: "frozen" };
+        scaledUiAmount?: { multiplier: number; authority?: string };
       };
       dryRun?: boolean;
       allowMainnet?: boolean;
@@ -105,34 +183,56 @@ export function registerTokenTools(
     }) => {
       const conn = connections.get(args.cluster);
       const from = deps.store.require(args.walletName).keypair;
+      const mintTo = args.mintTo
+        ? { owner: new PublicKey(args.mintTo.owner), amount: BigInt(args.mintTo.amount) }
+        : undefined;
+
+      // --- preset path: preset supplies defaults, explicit fields override.
+      if (args.preset) {
+        const extOverride = args.extensions ? toCoreExtensions(args.extensions) : undefined;
+        const result = await createFromPreset(conn, from, args.preset, {
+          decimals: args.decimals,
+          program: args.tokenProgram,
+          extensions: extOverride,
+          dryRun: args.dryRun,
+          allowMainnet: args.allowMainnet,
+          mintTo,
+        });
+        return {
+          mint: result.mint,
+          preset: result.preset,
+          tokenProgram: result.tokenProgram,
+          extensions: result.extensions,
+          notes: result.notes,
+          signature: result.signature,
+          slot: result.slot,
+          feeLamports: result.feeLamports,
+          simulatedOnly: result.simulatedOnly,
+          logs: result.logs,
+          error: result.error,
+          mintTo: result.mintTo,
+        };
+      }
+
+      if (args.decimals === undefined) {
+        throw new Error("Missing decimals — required unless a preset is given.");
+      }
       const base = {
         decimals: args.decimals,
         dryRun: args.dryRun,
         allowMainnet: args.allowMainnet,
       };
+      /** Mint the initial supply after a successful (non-simulated) creation. */
+      const followUpMint = async (mint: string) => {
+        if (!mintTo) return undefined;
+        const minted = await mintTokens(conn, from, mint, mintTo.owner, mintTo.amount, {
+          allowMainnet: args.allowMainnet,
+        });
+        return { ...minted, owner: mintTo.owner.toBase58(), amount: mintTo.amount.toString() };
+      };
 
       if (args.tokenProgram === "token-2022") {
-        const raw = args.extensions ?? {};
-        const extensions: Token2022ExtensionOptions = {};
-        if (raw.transferFeeConfig) {
-          extensions.transferFeeConfig = {
-            transferFeeBasisPoints: raw.transferFeeConfig.transferFeeBasisPoints,
-            maximumFee: BigInt(raw.transferFeeConfig.maximumFee),
-          };
-        }
-        if (raw.transferHook) {
-          extensions.transferHook = { programId: new PublicKey(raw.transferHook.programId) };
-        }
-        if (raw.interestBearingConfig) {
-          extensions.interestBearingConfig = { rate: raw.interestBearingConfig.rate };
-        }
-        if (raw.nonTransferable) extensions.nonTransferable = true;
-        if (raw.permanentDelegate) {
-          extensions.permanentDelegate = { delegate: new PublicKey(raw.permanentDelegate.delegate) };
-        }
-        if (raw.tokenMetadata) extensions.tokenMetadata = raw.tokenMetadata;
-        if (raw.defaultAccountState) extensions.defaultAccountState = { accountState: "frozen" };
-
+        const extensions = toCoreExtensions(args.extensions ?? {});
         const result = await createToken2022(conn, from, { ...base, extensions });
         return {
           mint: result.mint,
@@ -144,6 +244,7 @@ export function registerTokenTools(
           simulatedOnly: result.simulatedOnly,
           logs: result.logs,
           error: result.error,
+          mintTo: !result.error && !result.simulatedOnly ? await followUpMint(result.mint) : undefined,
         };
       }
 
@@ -158,6 +259,7 @@ export function registerTokenTools(
         simulatedOnly: result.simulatedOnly,
         logs: result.logs,
         error: result.error,
+        mintTo: !result.error && !result.simulatedOnly ? await followUpMint(result.mint) : undefined,
       };
     }),
   );
@@ -166,7 +268,7 @@ export function registerTokenTools(
     "manage_token2022",
     {
       description:
-        "Runtime management of a token mint: mintTokens/burnTokens (SPL & Token-2022), plus Token-2022-only actions — setTransferFee (effective next epoch), freezeAccount/thawAccount, setMintAuthority/setFreezeAuthority (revoke requires confirmRevoke:true), updateMetadata (name/symbol/uri/custom key).",
+        "Runtime management of a token mint: mintTokens/burnTokens (SPL & Token-2022), plus Token-2022-only actions — setTransferFee (effective next epoch), freezeAccount/thawAccount, setMintAuthority/setFreezeAuthority (revoke requires confirmRevoke:true), updateMetadata (name/symbol/uri/custom key), updateScaledUiMultiplier (display-only), enableMemoTransfer/disableMemoTransfer (this wallet's own ATA; reallocates it when needed), withdrawWithheldFromAccounts / harvestWithheldToMint / withdrawWithheldFromMint (transfer-fee collection), updateTransferHookProgram. Verify results with inspect_mint / inspect_token_account.",
       inputSchema: {
         walletName: z.string().describe("Authority wallet (loaded)."),
         mint: z.string().describe("Mint address."),
@@ -180,10 +282,17 @@ export function registerTokenTools(
             "setMintAuthority",
             "setFreezeAuthority",
             "updateMetadata",
+            "updateScaledUiMultiplier",
+            "enableMemoTransfer",
+            "disableMemoTransfer",
+            "withdrawWithheldFromAccounts",
+            "harvestWithheldToMint",
+            "withdrawWithheldFromMint",
+            "updateTransferHookProgram",
           ])
           .describe("Management action."),
         params: z.record(z.unknown()).optional().describe(
-          "Action params: mintTokens {destinationOwner, amount(base-unit string)} · burnTokens {amount} · setTransferFee {transferFeeBasisPoints, maximumFee(string)} · freezeAccount/thawAccount {tokenAccountOwner? (default: authority wallet)} · setMintAuthority/setFreezeAuthority {newAuthority | null + confirmRevoke:true to revoke} · updateMetadata {field(name|symbol|uri|custom), value}.",
+          "Action params: mintTokens {destinationOwner, amount} · burnTokens {amount} · setTransferFee {transferFeeBasisPoints, maximumFee} · freezeAccount/thawAccount {tokenAccountOwner? (default: authority wallet)} · setMintAuthority/setFreezeAuthority {newAuthority | null + confirmRevoke:true to revoke} · updateMetadata {field(name|symbol|uri|custom), value} · updateScaledUiMultiplier {multiplier (number > 0), effectiveTimestamp? (unix seconds, default 0 = now)} · enableMemoTransfer/disableMemoTransfer {} (acts on this wallet's ATA of the mint; wallet must own it) · withdrawWithheldFromAccounts {sources: string[] (token ACCOUNT addresses, not owners), destination? (token account; default this wallet's ATA)} · harvestWithheldToMint {sources: string[]} (permissionless) · withdrawWithheldFromMint {destination?} · updateTransferHookProgram {programId: string | null (null clears the hook)}. NOTE: amount and maximumFee are base units (integer string, NOT human-readable) — \"1000000\" = 1 token at 6 decimals; \"1.5\" is rejected.",
         ),
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
@@ -201,7 +310,14 @@ export function registerTokenTools(
         | "thawAccount"
         | "setMintAuthority"
         | "setFreezeAuthority"
-        | "updateMetadata";
+        | "updateMetadata"
+        | "updateScaledUiMultiplier"
+        | "enableMemoTransfer"
+        | "disableMemoTransfer"
+        | "withdrawWithheldFromAccounts"
+        | "harvestWithheldToMint"
+        | "withdrawWithheldFromMint"
+        | "updateTransferHookProgram";
       params?: Record<string, unknown>;
       dryRun?: boolean;
       allowMainnet?: boolean;
@@ -219,17 +335,36 @@ export function registerTokenTools(
         }
         return v;
       };
+      const optionalStr = (key: string): string | undefined =>
+        typeof p[key] === "string" && (p[key] as string).length > 0 ? (p[key] as string) : undefined;
+      const addressList = (key: string): string[] => {
+        const v = p[key];
+        if (!Array.isArray(v) || v.length === 0 || !v.every((x) => typeof x === "string" && x.length > 0)) {
+          throw new Error(`Missing params.${key} — required for action "${args.action}" (non-empty array of token ACCOUNT addresses, not wallet owners).`);
+        }
+        return v as string[];
+      };
+      /** Base-unit fields: integer strings only — "1.5" is a unit mistake, not a number. */
+      const baseUnits = (key: string): bigint => {
+        const v = str(key, "base-unit integer string");
+        if (!/^\d+$/.test(v)) {
+          throw new Error(
+            `params.${key} must be an integer string in token base units (got "${v}"). This field is NOT human-readable: for 1.5 tokens at 6 decimals pass "1500000".`,
+          );
+        }
+        return BigInt(v);
+      };
 
       switch (args.action) {
         case "mintTokens": {
-          const amount = BigInt(str("amount", "base-unit integer string"));
+          const amount = baseUnits("amount");
           return {
             action: args.action,
             ...(await mintTokens(conn, from, mint, str("destinationOwner", "recipient wallet address"), amount, opts)),
           };
         }
         case "burnTokens": {
-          const amount = BigInt(str("amount", "base-unit integer string"));
+          const amount = baseUnits("amount");
           return { action: args.action, ...(await burnTokens(conn, from, mint, amount, opts)) };
         }
         case "setTransferFee": {
@@ -244,7 +379,7 @@ export function registerTokenTools(
               conn,
               from,
               mint,
-              { transferFeeBasisPoints: bps, maximumFee: str("maximumFee", "base-unit integer string") },
+              { transferFeeBasisPoints: bps, maximumFee: baseUnits("maximumFee").toString() },
               opts,
             )),
           };
@@ -282,6 +417,65 @@ export function registerTokenTools(
               { field: str("field", "name | symbol | uri | custom key"), value: str("value", "new field value") },
               opts,
             )),
+          };
+        }
+        case "updateScaledUiMultiplier": {
+          const multiplier = p.multiplier;
+          if (typeof multiplier !== "number" || !(multiplier > 0)) {
+            throw new Error("Missing params.multiplier — a number > 0 (display-only: UIs show raw × multiplier).");
+          }
+          const ts = p.effectiveTimestamp;
+          const effectiveTimestamp =
+            typeof ts === "number" || typeof ts === "string" ? BigInt(ts) : undefined;
+          return {
+            action: args.action,
+            note: "ScaledUiAmount only changes how UIs display balances; raw amounts are unchanged.",
+            ...(await updateScaledUiMultiplier(conn, { mint, authority: from, multiplier, effectiveTimestamp }, opts)),
+          };
+        }
+        case "enableMemoTransfer":
+        case "disableMemoTransfer": {
+          const fn = args.action === "enableMemoTransfer" ? enableMemoTransfer : disableMemoTransfer;
+          return {
+            action: args.action,
+            tokenAccount: getAssociatedTokenAddressSync(mint, from.publicKey, true, TOKEN_2022_PROGRAM_ID).toBase58(),
+            ...(await fn(conn, { owner: from, mint }, opts)),
+          };
+        }
+        case "withdrawWithheldFromAccounts": {
+          return {
+            action: args.action,
+            ...(await withdrawWithheldFromAccounts(
+              conn,
+              { mint, authority: from, sources: addressList("sources"), destination: optionalStr("destination") },
+              opts,
+            )),
+          };
+        }
+        case "harvestWithheldToMint": {
+          return {
+            action: args.action,
+            ...(await harvestWithheldToMint(conn, { payer: from, mint, sources: addressList("sources") }, opts)),
+          };
+        }
+        case "withdrawWithheldFromMint": {
+          return {
+            action: args.action,
+            ...(await withdrawWithheldFromMint(
+              conn,
+              { mint, authority: from, destination: optionalStr("destination") },
+              opts,
+            )),
+          };
+        }
+        case "updateTransferHookProgram": {
+          const raw = p.programId;
+          if (raw !== null && typeof raw !== "string") {
+            throw new Error("Missing params.programId — pass a base58 program address, or null to clear the hook.");
+          }
+          return {
+            action: args.action,
+            ...(await updateTransferHookProgram(conn, { mint, authority: from, programId: raw }, opts)),
           };
         }
       }

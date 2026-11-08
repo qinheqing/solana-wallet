@@ -10,6 +10,7 @@ export interface ExtensionFormState {
   permanentDelegate: { enabled: boolean; delegate: string };
   tokenMetadata: { enabled: boolean; name: string; symbol: string; uri: string };
   defaultAccountState: { enabled: boolean };
+  scaledUiAmount: { enabled: boolean; multiplier: string };
 }
 
 export function makeDefaultExtensionFormState(): ExtensionFormState {
@@ -21,6 +22,7 @@ export function makeDefaultExtensionFormState(): ExtensionFormState {
     permanentDelegate: { enabled: false, delegate: "" },
     tokenMetadata: { enabled: false, name: "", symbol: "", uri: "" },
     defaultAccountState: { enabled: false },
+    scaledUiAmount: { enabled: false, multiplier: "1.5" },
   };
 }
 
@@ -66,6 +68,10 @@ export function buildToken2022Extensions(
     extensions.defaultAccountState = { accountState: "frozen" };
     summary.push("New accounts default FROZEN (must be thawed)");
   }
+  if (state.scaledUiAmount.enabled) {
+    extensions.scaledUiAmount = { multiplier: Number(state.scaledUiAmount.multiplier) };
+    summary.push(`Scaled UI amount: ×${state.scaledUiAmount.multiplier} (display only)`);
+  }
 
   return { extensions: Object.keys(extensions).length > 0 ? extensions : undefined, summary };
 }
@@ -104,17 +110,17 @@ export function Token2022ExtensionsPanel({
           label="Enable transferFeeConfig extension"
         />
         {state.transferFee.enabled && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label>Fee (basis points, 100 = 1%)</Label>
-              <Input
+              <Label htmlFor="token2022extensionspanel-fee">Fee (basis points, 100 = 1%)</Label>
+              <Input id="token2022extensionspanel-fee"
                 value={state.transferFee.feeBps}
                 onChange={(e) => onChange({ ...state, transferFee: { ...state.transferFee, feeBps: e.target.value } })}
               />
             </div>
             <div>
-              <Label>Max fee (base units)</Label>
-              <Input
+              <Label htmlFor="token2022extensionspanel-max-fee">Max fee (base units)</Label>
+              <Input id="token2022extensionspanel-max-fee"
                 value={state.transferFee.maxFee}
                 onChange={(e) => onChange({ ...state, transferFee: { ...state.transferFee, maxFee: e.target.value } })}
               />
@@ -132,8 +138,8 @@ export function Token2022ExtensionsPanel({
         />
         {state.transferHook.enabled && (
           <div>
-            <Label>Hook program address</Label>
-            <Input
+            <Label htmlFor="token2022extensionspanel-hook-program-address">Hook program address</Label>
+            <Input id="token2022extensionspanel-hook-program-address"
               value={state.transferHook.programId}
               onChange={(e) => onChange({ ...state, transferHook: { ...state.transferHook, programId: e.target.value } })}
               placeholder="Program invoked on every transfer"
@@ -151,8 +157,8 @@ export function Token2022ExtensionsPanel({
         />
         {state.interestBearing.enabled && (
           <div>
-            <Label>Interest rate (signed basis points, -32768..32767)</Label>
-            <Input
+            <Label htmlFor="token2022extensionspanel-interest-rate">Interest rate (signed basis points, -32768..32767)</Label>
+            <Input id="token2022extensionspanel-interest-rate"
               value={state.interestBearing.rate}
               onChange={(e) => onChange({ ...state, interestBearing: { ...state.interestBearing, rate: e.target.value } })}
             />
@@ -183,8 +189,8 @@ export function Token2022ExtensionsPanel({
               account, at any time, without their consent.
             </RiskBanner>
             <div>
-              <Label>Permanent delegate address</Label>
-              <Input
+              <Label htmlFor="token2022extensionspanel-permanent-delegate-address">Permanent delegate address</Label>
+              <Input id="token2022extensionspanel-permanent-delegate-address"
                 value={state.permanentDelegate.delegate}
                 onChange={(e) =>
                   onChange({ ...state, permanentDelegate: { ...state.permanentDelegate, delegate: e.target.value } })
@@ -203,24 +209,24 @@ export function Token2022ExtensionsPanel({
           label="Enable on-chain tokenMetadata extension"
         />
         {state.tokenMetadata.enabled && (
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
-              <Label>Name</Label>
-              <Input
+              <Label htmlFor="token2022extensionspanel-name">Name</Label>
+              <Input id="token2022extensionspanel-name"
                 value={state.tokenMetadata.name}
                 onChange={(e) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, name: e.target.value } })}
               />
             </div>
             <div>
-              <Label>Symbol</Label>
-              <Input
+              <Label htmlFor="token2022extensionspanel-symbol">Symbol</Label>
+              <Input id="token2022extensionspanel-symbol"
                 value={state.tokenMetadata.symbol}
                 onChange={(e) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, symbol: e.target.value } })}
               />
             </div>
             <div>
-              <Label>URI</Label>
-              <Input
+              <Label htmlFor="token2022extensionspanel-uri">URI</Label>
+              <Input id="token2022extensionspanel-uri"
                 value={state.tokenMetadata.uri}
                 onChange={(e) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, uri: e.target.value } })}
               />
@@ -240,6 +246,27 @@ export function Token2022ExtensionsPanel({
           <div className="text-xs text-zinc-500">
             Useful for whitelist-gated tokens: every new holder account starts frozen and must be
             thawed by the freeze authority before it can send or receive this token.
+          </div>
+        )}
+      </div>
+
+      {/* Scaled UI amount */}
+      <div className="space-y-2 rounded-md border border-zinc-800 p-3">
+        <Toggle
+          checked={state.scaledUiAmount.enabled}
+          onChange={(enabled) => onChange({ ...state, scaledUiAmount: { ...state.scaledUiAmount, enabled } })}
+          label="Enable scaledUiAmount extension (display-only multiplier)"
+        />
+        {state.scaledUiAmount.enabled && (
+          <div>
+            <Label htmlFor="token2022extensionspanel-scaled-multiplier">UI multiplier (&gt; 0)</Label>
+            <Input id="token2022extensionspanel-scaled-multiplier"
+              value={state.scaledUiAmount.multiplier}
+              onChange={(e) => onChange({ ...state, scaledUiAmount: { ...state.scaledUiAmount, multiplier: e.target.value } })}
+            />
+            <div className="text-xs text-zinc-500">
+              Wallets/explorers display raw × multiplier. Raw balances and every amount in this app stay unscaled.
+            </div>
           </div>
         )}
       </div>

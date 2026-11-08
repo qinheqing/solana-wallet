@@ -4,6 +4,7 @@ import {
   freezeTokenAccount,
   getWalletBalance,
   mintTokens,
+  formatAmount,
   parseAmount,
   parseTransactionError,
   setFreezeAuthority,
@@ -19,6 +20,7 @@ import { Button, Card, Input, Label } from "../../components/ui";
 import { ResultView } from "../transfer/ResultView";
 import type { SimpleTxOutcome } from "../transfer/ResultView";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { MintInspectionPanel } from "./MintInspectionPanel";
 
 type Action =
   | "mint"
@@ -63,6 +65,7 @@ export function TokenManagePage() {
   const [newAuthority, setNewAuthority] = useState("");
   const [revoke, setRevoke] = useState(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const [confirmingTransfer, setConfirmingTransfer] = useState(false);
   // metadata
   const [metaField, setMetaField] = useState<"name" | "symbol" | "uri" | "custom">("name");
   const [metaCustomField, setMetaCustomField] = useState("");
@@ -157,9 +160,19 @@ export function TokenManagePage() {
     }
   };
 
+  const isAuthorityAction = action === "setMintAuthority" || action === "setFreezeAuthority";
+  const authorityLabel = action === "setMintAuthority" ? "mint" : "freeze";
+  // Handing the authority to any address other than the current wallet is a loss of control for this wallet.
+  const transfersAway =
+    isAuthorityAction && !revoke && newAuthority.trim().length > 0 && newAuthority.trim() !== currentWallet?.address;
+
   const run = () => {
-    if ((action === "setMintAuthority" || action === "setFreezeAuthority") && revoke) {
+    if (isAuthorityAction && revoke) {
       setConfirmingRevoke(true);
+      return;
+    }
+    if (transfersAway) {
+      setConfirmingTransfer(true);
       return;
     }
     void execute();
@@ -190,7 +203,7 @@ export function TokenManagePage() {
             }`}
           >
             <div className="font-mono text-xs text-zinc-400">
-              {t.mint} ({t.program}) — {t.uiAmount ?? 0}
+              {t.mint} ({t.program}) — {formatAmount(BigInt(t.amount), t.decimals)}
             </div>
             <Button
               variant="default"
@@ -208,6 +221,7 @@ export function TokenManagePage() {
 
       {active && activeToken && (
         <div className="space-y-3 rounded-md border border-zinc-800 p-3">
+          <MintInspectionPanel mint={activeToken.mint} />
           <div className="flex flex-wrap gap-2">
             {availableActions.map((a) => (
               <Button
@@ -225,23 +239,23 @@ export function TokenManagePage() {
 
           {(action === "mint" || action === "burn") && (
             <div>
-              <Label>Amount</Label>
-              <Input value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Label htmlFor="tokenmanagepage-amount">Amount</Label>
+              <Input id="tokenmanagepage-amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
           )}
 
           {(action === "freeze" || action === "thaw") && (
             <div>
-              <Label>Account owner (defaults to current wallet)</Label>
-              <Input value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
+              <Label htmlFor="tokenmanagepage-account-owner">Account owner (defaults to current wallet)</Label>
+              <Input id="tokenmanagepage-account-owner" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
             </div>
           )}
 
           {(action === "setMintAuthority" || action === "setFreezeAuthority") && (
             <div className="space-y-2">
               <div>
-                <Label>New authority address</Label>
-                <Input
+                <Label htmlFor="tokenmanagepage-new-authority-address">New authority address</Label>
+                <Input id="tokenmanagepage-new-authority-address"
                   value={newAuthority}
                   disabled={revoke}
                   onChange={(e) => setNewAuthority(e.target.value)}
@@ -256,10 +270,10 @@ export function TokenManagePage() {
           )}
 
           {action === "updateMetadata" && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <Label>Field</Label>
-                <select
+                <Label htmlFor="tokenmanagepage-field">Field</Label>
+                <select id="tokenmanagepage-field"
                   className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100"
                   value={metaField}
                   onChange={(e) => setMetaField(e.target.value as typeof metaField)}
@@ -272,13 +286,13 @@ export function TokenManagePage() {
               </div>
               {metaField === "custom" && (
                 <div>
-                  <Label>Custom field key</Label>
-                  <Input value={metaCustomField} onChange={(e) => setMetaCustomField(e.target.value)} />
+                  <Label htmlFor="tokenmanagepage-custom-field-key">Custom field key</Label>
+                  <Input id="tokenmanagepage-custom-field-key" value={metaCustomField} onChange={(e) => setMetaCustomField(e.target.value)} />
                 </div>
               )}
-              <div className={metaField === "custom" ? "col-span-2" : ""}>
-                <Label>New value</Label>
-                <Input value={metaValue} onChange={(e) => setMetaValue(e.target.value)} />
+              <div className={metaField === "custom" ? "sm:col-span-2" : ""}>
+                <Label htmlFor="tokenmanagepage-new-value">New value</Label>
+                <Input id="tokenmanagepage-new-value" value={metaValue} onChange={(e) => setMetaValue(e.target.value)} />
               </div>
             </div>
           )}
@@ -296,6 +310,32 @@ export function TokenManagePage() {
 
           <ResultView result={result} />
         </div>
+      )}
+
+      {confirmingTransfer && activeToken && (
+        <ConfirmDialog
+          title={`Transfer ${authorityLabel} authority`}
+          description={
+            <div className="space-y-1">
+              <div>
+                This hands the {authorityLabel} authority of <span className="font-mono text-xs">{activeToken.mint}</span>{" "}
+                to <span className="font-mono text-xs">{newAuthority.trim()}</span>.
+              </div>
+              <div className="text-amber-300">
+                Your current wallet will no longer be able to{" "}
+                {action === "setMintAuthority" ? "mint this token" : "freeze/thaw accounts of this token"}. Only the
+                new authority can hand it back.
+              </div>
+            </div>
+          }
+          confirmLabel="Transfer authority"
+          danger
+          onConfirm={() => {
+            setConfirmingTransfer(false);
+            void execute();
+          }}
+          onCancel={() => setConfirmingTransfer(false)}
+        />
       )}
 
       {confirmingRevoke && activeToken && (

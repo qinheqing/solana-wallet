@@ -91,8 +91,8 @@ export function BatchTransfer() {
   return (
     <Card className="space-y-3">
       <div>
-        <Label>Recipients (one per line: address,amount)</Label>
-        <Textarea
+        <Label htmlFor="batchtransfer-recipients">Recipients (one per line: address,amount)</Label>
+        <Textarea id="batchtransfer-recipients"
           rows={6}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -103,14 +103,14 @@ export function BatchTransfer() {
         )}
         <div className="mt-1 text-xs text-zinc-500">{lines.length - lineErrors.length} valid recipient(s)</div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <Label>Mint (leave empty for SOL)</Label>
-          <Input value={mint} onChange={(e) => setMint(e.target.value)} placeholder="optional mint address" />
+          <Label htmlFor="batchtransfer-mint">Mint (leave empty for SOL)</Label>
+          <Input id="batchtransfer-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder="optional mint address" />
         </div>
         <div>
-          <Label>Decimals (token only)</Label>
-          <Input value={decimals} onChange={(e) => setDecimals(e.target.value)} disabled={!mint} />
+          <Label htmlFor="batchtransfer-decimals">Decimals (token only)</Label>
+          <Input id="batchtransfer-decimals" value={decimals} onChange={(e) => setDecimals(e.target.value)} disabled={!mint} />
         </div>
       </div>
       <label className="flex items-center gap-2 text-sm text-zinc-300">
@@ -137,11 +137,18 @@ export function BatchTransfer() {
               </div>
               <ul className="space-y-1">
                 {batch.results.map((r, i) => (
-                  <li key={i} className="flex items-center justify-between gap-2 font-mono text-xs">
-                    <span className="truncate text-zinc-400">{r.to}</span>
-                    <Badge tone={r.status === "success" ? "success" : r.status === "failed" ? "danger" : "default"}>
-                      {r.status}
-                    </Badge>
+                  <li key={i} className="font-mono text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-zinc-400">{r.to}</span>
+                      <Badge tone={r.status === "success" ? "success" : r.status === "failed" ? "danger" : "default"}>
+                        {r.status}
+                      </Badge>
+                    </div>
+                    {r.error && (
+                      <div className="mt-0.5 text-red-400">
+                        {r.error.code}: {r.error.message}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

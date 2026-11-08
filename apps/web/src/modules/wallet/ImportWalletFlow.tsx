@@ -51,8 +51,8 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
 
       {mode === "keyfile" && (
         <div>
-          <Label>solana-keygen JSON (64-byte array)</Label>
-          <Textarea
+          <Label htmlFor="importwalletflow-solana-keygen-json">solana-keygen JSON (64-byte array)</Label>
+          <Textarea id="importwalletflow-solana-keygen-json"
             rows={4}
             value={keyfileJson}
             onChange={(e) => setKeyfileJson(e.target.value)}
@@ -64,12 +64,12 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
       {mode === "mnemonic" && (
         <div className="space-y-3">
           <div>
-            <Label>Mnemonic phrase</Label>
-            <Textarea rows={2} value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="word1 word2 ..." />
+            <Label htmlFor="importwalletflow-mnemonic-phrase">Mnemonic phrase</Label>
+            <Textarea id="importwalletflow-mnemonic-phrase" rows={2} value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="word1 word2 ..." />
           </div>
           <div>
-            <Label>Derivation path</Label>
-            <select
+            <Label htmlFor="importwalletflow-derivation-path">Derivation path</Label>
+            <select id="importwalletflow-derivation-path"
               value={path}
               onChange={(e) => setPath(e.target.value)}
               className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 focus:border-emerald-600 focus:outline-none"
@@ -86,8 +86,8 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
 
       <div className="space-y-3 border-t border-zinc-800 pt-3">
         <div>
-          <Label>Wallet name</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. imported-1" />
+          <Label htmlFor="importwalletflow-wallet-name">Wallet name</Label>
+          <Input id="importwalletflow-wallet-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. imported-1" />
         </div>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={usePassword} onChange={(e) => setUsePassword(e.target.checked)} />
@@ -95,8 +95,8 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
         </label>
         {usePassword ? (
           <div>
-            <Label>Password (min 8 chars)</Label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Label htmlFor="importwalletflow-password">Password (min 8 chars)</Label>
+            <Input id="importwalletflow-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
         ) : (
           <RiskBanner>

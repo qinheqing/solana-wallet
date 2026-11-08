@@ -2,7 +2,7 @@
   "master": {
     "tasks": [
       {
-        "id": 1,
+        "id": "1",
         "title": "搭建 monorepo 基础工程结构",
         "description": "初始化 pnpm workspace monorepo，含 packages/core、packages/mcp、packages/cpi-program、apps/web、skills/solana-wallet，配置 TypeScript ≥5.5、Node ≥20、Vitest 与共享 lint 配置",
         "details": "pnpm init workspace；创建 packages/core、packages/mcp、packages/cpi-program、apps/web 目录；根 tsconfig（strict，target ES2022）；pnpm-workspace.yaml 声明 packages/*、apps/*；安装 @solana/web3.js 1.x、@solana/spl-token、@sqds/multisig、@modelcontextprotocol/sdk、Vitest；core 包命名为 @solwallet/core，零 UI 依赖",
@@ -56,7 +56,7 @@
         "updatedAt": "2026-11-07T05:41:28.588Z"
       },
       {
-        "id": 2,
+        "id": "2",
         "title": "实现网络连接与集群管理（F2）",
         "description": "在 core 中封装 ClusterConnection：支持三官方集群 + 自定义 RPC URL、健康检查（slot/版本/TPS）、airdrop、可配置确认策略",
         "details": "定义 ClusterConnection 类/工厂：createConnection(cluster|rpcUrl)；getHealth(): {slot, version, tps}；requestAirdrop 仅限 devnet/testnet；确认策略参数 {commitment: 'confirmed'|'finalized', timeoutMs, retries}；sendWithRetry 封装 confirmTransaction；mainnet-beta 签名/发送需显式 allowMainnet: true 否则抛出风险错误",
@@ -125,7 +125,7 @@
         "updatedAt": "2026-11-07T05:41:28.594Z"
       },
       {
-        "id": 3,
+        "id": "3",
         "title": "实现钱包管理模块（F3）",
         "description": "钱包生成、JSON 密钥导入/导出（solana-keygen 兼容）、BIP39 助记词导入与派生路径、AES-256-GCM 加密存储、SOL/SPL/Token2022 余额查询",
         "details": "使用 @solana/web3.js Keypair + tweetnacl 生成 Ed25519；JSON 密钥格式 [byte array] 与 solana-keygen 兼容；助记词用 bip39 + ed25519-hd-key，默认派生路径 m/44'/501'/0'/0' 可配置；加密存储用 node:crypto AES-256-GCM，导出明文需 explicit confirm 参数；余额查询：getBalance + getTokenAccountsByOwner（覆盖 Token Program 与 Token-2022 Program）；日志/输出脱敏：只输出地址，永不输出密钥与助记词",
@@ -208,7 +208,7 @@
         "updatedAt": "2026-11-07T05:41:28.602Z"
       },
       {
-        "id": 4,
+        "id": "4",
         "title": "实现金额换算与错误解析工具",
         "description": "统一金额工具：最小单位内部计算，展示层精度换算；错误解析器将程序错误映射为可读信息（如 insufficient funds）并附建议动作",
         "details": "formatAmount(rawAmount, decimals) / parseAmount(displayAmount, decimals) 使用 bigint 防精度丢失；错误解析器捕获 SendTransactionError，解析程序错误码（InsufficientFundsForFee、AccountNotFound 等）返回 {code, message, suggestion}",
@@ -250,7 +250,7 @@
         "updatedAt": "2026-11-07T05:41:28.605Z"
       },
       {
-        "id": 5,
+        "id": "5",
         "title": "实现单笔转账核心逻辑（F4.1/F4.5/F4.6）",
         "description": "自动识别 mint 所属 Program（SPL/Token2022/System）；ATA 自动创建可开关；dry-run simulateTransaction 开关；回执含签名、slot、费用、错误详情",
         "details": "getMintProgram(mint) 通过 account owner 判断 System/Token/Token2022；buildTransferInstruction 分派到三种程序；ATA 创建用 createAssociatedTokenAccountIdempotentInstruction，allowAtaCreation 开关；dry-run: simulateTransaction 收集 logs/units；TransferResult: {signature, slot, fee, logs, error?}；复用错误解析器（任务4）",
@@ -332,7 +332,7 @@
         "updatedAt": "2026-11-07T05:41:28.612Z"
       },
       {
-        "id": 6,
+        "id": "6",
         "title": "实现批量转账与混合转账（F4.2/F4.3）",
         "description": "批量转账：智能分批（≤指令上限、交易≤1232 字节），串行发送逐笔报告；混合转账：单笔交易内多 mint（SOL+SPL+Token2022）指令组合",
         "details": "estimateTransactionSize(instructions) 用 packTransaction 或模拟序列化估算字节数；分批算法：按指令数与字节数双约束切分；executeBatchTransfer 串行循环发送，返回 per-recipient 结果数组；executeMixedTransfer 接收 [{mint|'SOL', to, amount}] 合并进单个 VersionedTransaction",
@@ -414,7 +414,7 @@
         "updatedAt": "2026-11-07T05:41:28.618Z"
       },
       {
-        "id": 7,
+        "id": "7",
         "title": "实现示例 CPI 程序与部署支持（F4.4）",
         "description": "用 Anchor 编写最小示例程序：接收指令后通过 CPI 循环完成多笔 Token 转账；提供构建与部署脚本（localnet/testnet）",
         "details": "packages/cpi-program：Anchor 程序 instruction {vault_authority, recipients: Vec<Pubkey>, amounts: Vec<u64>, mint}；循环调用 token::transfer；提供 build（anchor build）与 deploy 脚本；core 提供 deployCpiProgram 与 buildCpiTransferInstruction 辅助函数，仅在 dev/testnet 部署",
@@ -484,7 +484,7 @@
         "updatedAt": "2026-11-07T05:41:28.623Z"
       },
       {
-        "id": 8,
+        "id": "8",
         "title": "实现代币发行（F5.1/F5.2/F5.4）",
         "description": "创建 SPL mint 与 Token2022 mint（可选扩展：Transfer Fee、Transfer Hook、Interest Bearing、Non-Transferable、Permanent Delegate、Metadata Pointer+Token Metadata、Default Account State）；mint/burn",
         "details": "SPL: createMint2/initializeMint（decimals、mint/freeze authority）；Token2022: 组装扩展列表用 @solana/spl-token 的 createInitializeTransferFeeConfigInstruction 等各扩展指令，Metadata 用 Three-Instruction Token Metadata 流程；mintTo/burn 封装统一接口；所有扩展参数结构化定义",
@@ -566,7 +566,7 @@
         "updatedAt": "2026-11-07T05:41:28.630Z"
       },
       {
-        "id": 9,
+        "id": "9",
         "title": "实现 Token2022 插件运行时管理（F5.3）",
         "description": "对已存在 Token2022 mint 运行时管理：更新 Transfer Fee（按 epoch 生效）、冻结/解冻账户、更新 mint/freeze authority、更新元数据",
         "details": "封装 setTransferFee、freezeAccount/thawAccount、setAuthority（MintTokens/FreezeAccount）、updateField（Name/Symbol/Uri/AdditionalMetadata）到 TokenManager 类；每个操作校验当前钱包持有对应 authority，否则给出明确错误与建议",
@@ -635,7 +635,7 @@
         "updatedAt": "2026-11-07T05:41:28.636Z"
       },
       {
-        "id": 10,
+        "id": "10",
         "title": "实现 Squads V4 多签模块（F6）",
         "description": "基于 @sqds/multisig：创建 M-of-N 多签、成员管理与阈值修改、提案创建→审批→执行流程、提案状态查询",
         "details": "封装 MultisigClient：createMultisig(members, threshold)、addMember/removeMember/setThreshold、createTransferProposal(txMessage)、approveProposal、executeProposal、listProposals(status)；提案支持 SOL/SPL/Token2022 转账指令复用任务5的构造逻辑；V4 程序地址三集群默认已部署",
@@ -719,7 +719,7 @@
         "updatedAt": "2026-11-07T05:41:28.643Z"
       },
       {
-        "id": 11,
+        "id": "11",
         "title": "实现 MCP Server（F1.1）",
         "description": "MCP Server（stdio）：每个 core 功能对应一个 MCP 工具，清晰的 inputSchema 与描述；密钥输出默认脱敏",
         "details": "packages/mcp：用 @modelcontextprotocol/sdk 的 McpServer + registerTool；工具清单：createWallet/importWallet/getBalances/transfer/batchTransfer/mixedTransfer/createToken/manageToken2022/multisig 系列/getClusterStatus/requestAirdrop；每个 inputSchema 带描述使 AI 零文档可调用；输出统一脱敏器（任务3）；bin 入口支持 npx 运行",
@@ -822,7 +822,7 @@
         "updatedAt": "2026-11-07T05:41:28.651Z"
       },
       {
-        "id": 12,
+        "id": "12",
         "title": "编写 Claude Skill 与 README 上手指南（F1.2/F1.4）",
         "description": "编写 skills/solana-wallet/SKILL.md（何时用哪个功能与参数约定）；编写 5 分钟上手 README：clone → install → 配置 RPC → 让 AI 接管，含 claude mcp add / .mcp.json 配置片段",
         "details": "SKILL.md 按 MCP 工具分类描述典型任务序列（验收标准1流程）；README 含 npx 启动说明、三种集群 RPC 配置示例（含 Helius/QuickNode 自定义 URL）、风险提示（mainnet allowMainnet）；npm 发布配置 @solwallet/core 与 mcp 包",
@@ -876,7 +876,7 @@
         "updatedAt": "2026-11-07T05:41:41.931Z"
       },
       {
-        "id": 13,
+        "id": "13",
         "title": "实现 Web UI（F7）",
         "description": "React + Vite + Tailwind 单页应用：Dashboard（网络状态+余额）、钱包、转账、代币发行、多签模块；左侧网络与钱包，右侧功能区",
         "details": "apps/web：React Router 或 tab 布局；直接在浏览器调用 RPC（纯前端，无服务器）；复用 core 的纯逻辑函数（指令构造、金额换算）避免重复实现；深色主题技术感设计；转账/导出/发币操作前弹二次确认与风险提示；本地 localStorage 保存交易历史 {signature, status, fee}，链接 Explorer（按 cluster 动态生成）",
@@ -992,7 +992,7 @@
         "updatedAt": "2026-11-07T05:41:28.664Z"
       },
       {
-        "id": 14,
+        "id": "14",
         "title": "端到端验收测试与测试补齐",
         "description": "确保 core 层单元测试覆盖钱包、金额换算、批量分片；补齐 CI 脚本；核对 MVP 验收标准1-4全部达成",
         "details": "补测试缺口：钱包边界（无效助记词、错误密码）、金额精度、分片算法、ATA 开关；package.json scripts：test/build/dev；验证 pnpm test 全绿；对照验收标准逐条检查 MCP 与 Web UI 流程、多签 2-of-3 流程",
@@ -1061,18 +1061,174 @@
         "recommendedSubtasks": 4,
         "expansionPrompt": "将任务14拆分为：1) 排查并补齐钱包边界测试（无效助记词、错误密码）；2) 补齐金额精度与分片算法边界测试；3) 补齐 ATA 开关等转账测试缺口与 CI scripts（test/build/dev）；4) 生成覆盖率报告并核对 MVP 验收标准1-4逐项清单。",
         "updatedAt": "2026-11-07T05:41:28.669Z"
+      },
+      {
+        "id": "15",
+        "title": "T-A 地址与账户观察（deriveTokenAddresses / inspectMint / inspectTokenAccount）",
+        "description": "core: deriveTokenAddresses 同时返回 legacy+2022 ATA（isOffCurve、owner off-curve 校验）；inspectMint 解码全部扩展参数与 accountLen；inspectTokenAccount 返回账户级扩展与 withheld；shortAddress 改 6+4；TokenBalance.uiAmount 改可选。MCP: derive_address / inspect_mint / inspect_token_account；get_balances 去掉 uiAmount。详见 .taskmaster/docs/prd-token2022-capabilities.md T-A",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:49:37.734Z"
+      },
+      {
+        "id": "16",
+        "title": "T-B 交易计划 TransactionPlan 与构造旋钮",
+        "description": "core: TransactionPlan 类型（指令 programId/accounts/dataHex/label、messageHex、estimatedBytes、signers、blockhash）；buildTransferPlan 新增 computeBudget / ataMode(auto|always-idempotent|create|none) / instruction(transferChecked|transfer|transferCheckedWithFee) / authority+sourceOwner / memo 旋钮，默认保持现状；transfer() 接受同样旋钮并返回 plan。MCP: build_transfer 只构造不发送；transfer 加同名参数。PRD T-B",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:49:37.737Z"
+      },
+      {
+        "id": "17",
+        "title": "T-C 预检 preflightTransfer 与 force 发送",
+        "description": "core: preflightTransfer 返回 {ok, findings[]}（TRANSFER_HOOK_PRESENT/MEMO_REQUIRED block；ACCOUNT_FROZEN/NON_TRANSFERABLE block；DEST_ATA_MISSING/TRANSFER_FEE info；SCALED_UI_AMOUNT warn）；transfer() 默认先 preflight，block 时返回 error.code=PREFLIGHT_BLOCKED 带 findings，force:true 跳过。MCP: preflight_transfer 工具；transfer 加 force。PRD T-C",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "15",
+          "16"
+        ],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:57:58.407Z"
+      },
+      {
+        "id": "18",
+        "title": "T-D 原始交易通道（sign/simulate/send raw hex）",
+        "description": "core: signTransactionHex 部分签名返回新 hex 与 signature；simulateRaw；sendRaw（走 mainnet 守卫）。MCP: sign_transaction / simulate_transaction / send_transaction。PRD T-D",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:49:37.739Z"
+      },
+      {
+        "id": "19",
+        "title": "T-E 交易解析 inspectTransaction 与错误解码 decodeInstructionError",
+        "description": "core: inspectTransaction(signature|getTransaction JSON) 输出 movements[]（program/instructionType/isInner/source+owner/dest+owner/authority/mint/amount/fee{amount,source}/balanceDelta）、balanceChanges、warnings、explorerUrl；decodeInstructionError 解析 InstructionError 为 instructionIndex/programId/customCode/name（SPL Token 与 Token-2022 错误枚举表），并入 parseTransactionError 的 custom 字段。fixture 放 packages/core/src/inspect/__fixtures__ 覆盖 7 类交易并离线测试。MCP: inspect_transaction。PRD T-E",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:49:37.741Z"
+      },
+      {
+        "id": "20",
+        "title": "T-F ScaledUiAmount 扩展与 TOKEN_PRESETS 预设层",
+        "description": "core: createToken2022Mint 新增 scaledUiAmount{multiplier}，manage 新增 updateScaledUiMultiplier；TOKEN_PRESETS（plain-2022/transfer-fee/permanent-delegate/scaled-ui/transfer-hook/legacy-spl/memo-required）可覆盖字段。MCP: create_token 加 preset 与 mintTo{owner,amount}。Web 发币页快速模板下拉。PRD T-F",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "15"
+        ],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:59:08.719Z"
+      },
+      {
+        "id": "21",
+        "title": "T-G 账户级扩展操作（MemoTransfer / withheld / hook program）",
+        "description": "manage_token2022 新增动作：enableMemoTransfer/disableMemoTransfer、withdrawWithheldFromAccounts、harvestWithheldToMint、withdrawWithheldFromMint、updateTransferHookProgram；inspectTokenAccount 可验证。PRD T-G",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "15"
+        ],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T16:59:08.724Z"
+      },
+      {
+        "id": "22",
+        "title": "T-H 入账侧发送能力（delegate / 强制划转 / transferCheckedWithFee）",
+        "description": "基于 T-B 旋钮补齐 delegate 划转（approve 后）、PermanentDelegate 强制划转、transferCheckedWithFee、plain transfer；MCP transfer 支持 sourceOwner+authority；新增 approve_delegate / revoke_delegate。PRD T-H",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "16",
+          "17"
+        ],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T17:05:06.929Z"
+      },
+      {
+        "id": "23",
+        "title": "T-I 代币 CPI 转发程序 forward_transfer_checked",
+        "description": "cpi-program 新增 forward_transfer_checked 指令通过 CPI 调用 Token/Token-2022 transferChecked；core cpi.ts 新增 cpiTokenTransfer；MCP cpi_token_transfer；mollusk 测试。PRD T-I",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "16"
+        ],
+        "priority": "low",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T17:08:43.165Z"
+      },
+      {
+        "id": "24",
+        "title": "T-J Web：交易查看器与高级构造预览",
+        "description": "转账页高级构造折叠区（computeBudget/ataMode/instruction/memo/force）与预览面板（指令列表、message hex、预检结果）；新页面交易查看器（inspectTransaction + explorer 链接 + 导出 JSON）；代币管理页展示 inspectMint 扩展详情。PRD T-J",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "15",
+          "16",
+          "17",
+          "19"
+        ],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T17:05:56.187Z"
+      },
+      {
+        "id": "25",
+        "title": "T-K Skill 组合示例、examples 脚本与 README 更新",
+        "description": "SKILL.md 增加组合示例章节（建 mint→build_transfer→preflight→transfer→inspect_transaction、fixture 离线复现）；examples/ 三个 core API 脚本（费率净额、Memo 拦截与绕过、PermanentDelegate 划转）；README 工具总数与能力矩阵。PRD T-K",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22"
+        ],
+        "priority": "medium",
+        "subtasks": [],
+        "updatedAt": "2026-11-07T17:18:43.019Z"
       }
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-07T05:41:41.931Z",
-      "taskCount": 14,
-      "completedCount": 14,
+      "lastModified": "2026-11-07T17:18:43.019Z",
+      "taskCount": 25,
+      "completedCount": 25,
       "tags": [
         "master"
-      ],
-      "created": "2026-11-07T05:41:43.320Z",
-      "description": "Tasks for master context"
+      ]
     }
   }
 }

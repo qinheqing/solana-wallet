@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { serializeKeypairJson } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { copyText } from "../../lib/clipboard";
 import { Badge, Button, Card, Input, RiskBanner } from "../../components/ui";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { StoredWalletRecord } from "../../lib/types";
@@ -17,8 +18,8 @@ export function WalletList() {
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const copyAddress = async (addr: string) => {
-    await navigator.clipboard.writeText(addr);
-    setCopyMsg(addr);
+    const ok = await copyText(addr);
+    setCopyMsg(ok ? addr : "copy-failed");
     setTimeout(() => setCopyMsg(null), 1500);
   };
 
@@ -89,7 +90,7 @@ export function WalletList() {
             </div>
             <div className="flex flex-wrap gap-1.5">
               <Button variant="ghost" onClick={() => copyAddress(w.address)}>
-                {copyMsg === w.address ? "Copied" : "Copy"}
+                {copyMsg === w.address ? "Copied" : copyMsg === "copy-failed" ? "Copy failed" : "Copy"}
               </Button>
               <Button variant="default" onClick={() => doSwitch(w)}>
                 Select
@@ -108,7 +109,13 @@ export function WalletList() {
       {unlockTarget && !exportTarget && (
         <div className="space-y-2 rounded-md border border-zinc-700 bg-zinc-950 p-3">
           <div className="text-sm text-zinc-300">Unlock &quot;{unlockTarget.name}&quot;</div>
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
+          <Input
+            type="password"
+            aria-label={`Password for ${unlockTarget.name}`}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+          />
           {error && <div className="text-sm text-red-400">{error}</div>}
           <div className="flex gap-2">
             <Button variant="primary" onClick={confirmUnlock}>
@@ -134,6 +141,7 @@ export function WalletList() {
           {exportTarget.encrypted && !exportedSecret && (
             <Input
               type="password"
+              aria-label={`Password for ${exportTarget.name}`}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
@@ -154,6 +162,7 @@ export function WalletList() {
             <div className="space-y-2">
               <textarea
                 readOnly
+                aria-label="Exported secret key"
                 value={exportedSecret}
                 className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-200"
                 rows={3}

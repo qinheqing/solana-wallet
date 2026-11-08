@@ -4,7 +4,7 @@
  * mocked web3.js Connection, with instruction-object assertions (program
  * id / key layout / order) — no serialization needed.
  */
-import { ExtensionType, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getMintLen } from "@solana/spl-token";
+import { ExtensionType, LENGTH_SIZE, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, TYPE_SIZE, getMintLen } from "@solana/spl-token";
 import { pack } from "@solana/spl-token-metadata";
 import {
   Keypair,
@@ -196,7 +196,7 @@ describe("createToken2022 (8.2–8.4)", () => {
     expect(ixs.map((ix) => ix.data[0])).toEqual([0, 32, 35, 28, 20]);
   });
 
-  it("tokenMetadata → pointer init + metadata init last, space includes TLV", async () => {
+  it("tokenMetadata → pointer init + metadata init last; TLV pre-funded as rent, not space", async () => {
     const { conn, txs, fake } = recordingConn();
     await createToken2022(conn, payer, {
       decimals: 0,
@@ -208,22 +208,32 @@ describe("createToken2022 (8.2–8.4)", () => {
     // metadata init targets the Token-2022 program (it CPIs through it)
     expect(ixs[3]!.programId).toEqual(TOKEN_2022_PROGRAM_ID);
     expect(ixs[3]!.data.toString("utf8", 8)).toContain("Test Token");
-    // Variable-length TokenMetadata goes through the second getMintLen param.
-    const expectedSpace = getMintLen(
-      [ExtensionType.MetadataPointer],
-      {
-        [ExtensionType.TokenMetadata]: pack({
-          mint: Keypair.generate().publicKey, // length-only: same name/symbol/uri sizes
-          updateAuthority: payer.publicKey,
-          name: "Test Token",
-          symbol: "TST",
-          uri: "https://x.example/t.json",
-          additionalMetadata: [],
-        }).length,
-      },
+
+    // Regression (verified on solana-test-validator): InitializeMint2 fails
+    // with InvalidAccountData when the TokenMetadata TLV is allocated as
+    // account space. Space must be the fixed-extension length only…
+    const fixedSpace = getMintLen([ExtensionType.MetadataPointer]);
+    const createAccount = SystemProgram.createAccount({
+      fromPubkey: payer.publicKey,
+      newAccountPubkey: ixs[0]!.keys[1]!.pubkey,
+      lamports: 1_500_000,
+      space: fixedSpace,
+      programId: TOKEN_2022_PROGRAM_ID,
+    });
+    expect(ixs[0]!.data).toEqual(createAccount.data);
+    // …while rent is pre-funded for space + TLV header + packed metadata so
+    // createInitializeInstruction can realloc the account in place.
+    const metadataLen = pack({
+      mint: Keypair.generate().publicKey, // length-only: any 32-byte key
+      updateAuthority: payer.publicKey,
+      name: "Test Token",
+      symbol: "TST",
+      uri: "https://x.example/t.json",
+      additionalMetadata: [],
+    }).length;
+    expect(fake.getMinimumBalanceForRentExemption).toHaveBeenCalledWith(
+      fixedSpace + TYPE_SIZE + LENGTH_SIZE + metadataLen,
     );
-    // mint pubkey length in TLV is identical for any 32-byte key
-    expect(fake.getMinimumBalanceForRentExemption).toHaveBeenCalledWith(expectedSpace);
   });
 
   it("all extensions combined in one transaction", async () => {
@@ -243,6 +253,43 @@ describe("createToken2022 (8.2–8.4)", () => {
     );
     // createAccount + 4 ext inits (fee, interest, delegate, pointer) + mint2 + metadata init
     expect(txs[0]!.message.compiledInstructions).toHaveLength(8);
+  });
+
+  it("scaledUiAmount (T-F) → space includes ScaledUiAmountConfig; init ix precedes initializeMint2", async () => {
+    const { conn, txs, fake } = recordingConn();
+    const authority = Keypair.generate().publicKey;
+    const result = await createToken2022(conn, payer, {
+      decimals: 6,
+      extensions: { scaledUiAmount: { multiplier: 1.5, authority } },
+    });
+    expect(result.extensions).toEqual(["scaledUiAmount"]);
+    expect(fake.getMinimumBalanceForRentExemption).toHaveBeenCalledWith(
+      getMintLen([ExtensionType.ScaledUiAmountConfig]),
+    );
+    const ixs = decodeInstructions(txs[0]!);
+    expect(ixs).toHaveLength(3);
+    const init = ixs[1]!;
+    expect(init.programId).toEqual(TOKEN_2022_PROGRAM_ID);
+    // ScaledUiAmountExtension = 43, ScaledUiAmountInstruction.Initialize = 0
+    expect(init.data[0]).toBe(43);
+    expect(init.data[1]).toBe(0);
+    // authority (COption-style: 1 + 32 bytes) then f64 multiplier
+    expect(init.data.subarray(2, 34)).toEqual(Buffer.from(authority.toBytes()));
+    expect(init.data.readDoubleLE(init.data.length - 8)).toBe(1.5);
+    expect(ixs[2]!.data[0]).toBe(20); // InitializeMint2 after extension init
+  });
+
+  it("scaledUiAmount defaults the authority to the payer and rejects multiplier <= 0", async () => {
+    const { conn, txs } = recordingConn();
+    await createToken2022(conn, payer, { decimals: 0, extensions: { scaledUiAmount: { multiplier: 2 } } });
+    const init = decodeInstructions(txs[0]!)[1]!;
+    expect(init.data.subarray(2, 34)).toEqual(Buffer.from(payer.publicKey.toBytes()));
+    await expect(
+      createToken2022(conn, payer, { decimals: 0, extensions: { scaledUiAmount: { multiplier: 0 } } }),
+    ).rejects.toMatchObject({ code: "SCALED_UI_MULTIPLIER_INVALID" });
+    await expect(
+      createToken2022(conn, payer, { decimals: 0, extensions: { scaledUiAmount: { multiplier: Number.NaN } } }),
+    ).rejects.toMatchObject({ code: "SCALED_UI_MULTIPLIER_INVALID" });
   });
 
   it("validates extension parameters with structured errors", async () => {

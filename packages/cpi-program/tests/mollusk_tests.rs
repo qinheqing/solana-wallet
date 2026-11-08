@@ -268,3 +268,203 @@ fn batch_transfer_against_uninitialized_vault_is_rejected() {
         &[Check::err(ProgramError::Custom(ERROR_VAULT_UNINITIALIZED))],
     );
 }
+
+// ---------------------------------------------------------------------------
+// forward_transfer_checked (PRD T-I): the program CPIs TransferChecked on
+// SPL Token / Token-2022 with the caller as signing authority. The token
+// programs are loaded into mollusk from their bundled ELFs.
+// ---------------------------------------------------------------------------
+
+use mollusk_svm_programs_token::{token, token2022};
+
+/// Mirrors `INSTRUCTION_FORWARD_TRANSFER_CHECKED` in `src/lib.rs`.
+const INSTRUCTION_FORWARD_TRANSFER_CHECKED: u8 = 2;
+/// Mirrors `ERROR_INVALID_TOKEN_PROGRAM` in `src/lib.rs`.
+const ERROR_INVALID_TOKEN_PROGRAM: u32 = 8;
+
+/// Base (extension-less) SPL mint layout, 82 bytes. Token-2022 accepts the
+/// same base layout for mints without extensions.
+const MINT_LEN: usize = 82;
+/// Base token-account layout, 165 bytes (shared by both token programs).
+const TOKEN_ACCOUNT_LEN: usize = 165;
+/// Offset of the `amount` field inside a token account.
+const TOKEN_ACCOUNT_AMOUNT_OFFSET: usize = 64;
+
+fn forward_transfer_checked_data(amount: u64, decimals: u8) -> Vec<u8> {
+    let mut data = vec![INSTRUCTION_FORWARD_TRANSFER_CHECKED];
+    data.extend_from_slice(&amount.to_le_bytes());
+    data.push(decimals);
+    data
+}
+
+/// Hand-rolled mint: COption<mint_authority>=Some(authority), supply,
+/// decimals, is_initialized=1, COption<freeze_authority>=None.
+fn mint_account(owner_program: &Pubkey, mint_authority: &Pubkey, decimals: u8) -> Account {
+    let mut data = vec![0u8; MINT_LEN];
+    data[0..4].copy_from_slice(&1u32.to_le_bytes());
+    data[4..36].copy_from_slice(mint_authority.as_ref());
+    data[36..44].copy_from_slice(&1_000_000_000u64.to_le_bytes());
+    data[44] = decimals;
+    data[45] = 1;
+    Account {
+        lamports: Rent::default().minimum_balance(MINT_LEN),
+        data,
+        owner: *owner_program,
+        executable: false,
+        rent_epoch: 0,
+    }
+}
+
+/// Hand-rolled token account: mint, owner, amount, delegate=None,
+/// state=Initialized(1), is_native=None, delegated_amount=0, close=None.
+fn token_account(owner_program: &Pubkey, mint: &Pubkey, owner: &Pubkey, amount: u64) -> Account {
+    let mut data = vec![0u8; TOKEN_ACCOUNT_LEN];
+    data[0..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(owner.as_ref());
+    data[64..72].copy_from_slice(&amount.to_le_bytes());
+    data[108] = 1; // state = Initialized
+    Account {
+        lamports: Rent::default().minimum_balance(TOKEN_ACCOUNT_LEN),
+        data,
+        owner: *owner_program,
+        executable: false,
+        rent_epoch: 0,
+    }
+}
+
+/// Shared scenario: `authority` owns `source` holding 1_000 units; forward
+/// 250 units to `destination` through the given token program.
+fn run_forward(
+    token_program: &Pubkey,
+    add: fn(&mut Mollusk),
+    keyed_account: fn() -> (Pubkey, Account),
+) {
+    let program_id = Pubkey::new_unique();
+    let mut mollusk = Mollusk::new(&program_id, "solwallet_cpi");
+    add(&mut mollusk);
+
+    let authority = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let source = Pubkey::new_unique();
+    let destination = Pubkey::new_unique();
+    let decimals = 6u8;
+    let amount = 250u64;
+
+    let instruction = Instruction::new_with_bytes(
+        program_id,
+        &forward_transfer_checked_data(amount, decimals),
+        vec![
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new(source, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(*token_program, false),
+        ],
+    );
+
+    let accounts = vec![
+        (authority, system_account(1_000_000_000)),
+        (source, token_account(token_program, &mint, &authority, 1_000)),
+        (mint, mint_account(token_program, &authority, decimals)),
+        (destination, token_account(token_program, &mint, &Pubkey::new_unique(), 0)),
+        keyed_account(),
+    ];
+
+    mollusk.process_and_validate_instruction(
+        &instruction,
+        &accounts,
+        &[
+            Check::success(),
+            Check::account(&source)
+                .data_slice(TOKEN_ACCOUNT_AMOUNT_OFFSET, &750u64.to_le_bytes())
+                .build(),
+            Check::account(&destination)
+                .data_slice(TOKEN_ACCOUNT_AMOUNT_OFFSET, &250u64.to_le_bytes())
+                .build(),
+        ],
+    );
+}
+
+#[test]
+fn forward_transfer_checked_moves_spl_token_via_cpi() {
+    run_forward(&token::ID, token::add_program, token::keyed_account);
+}
+
+#[test]
+fn forward_transfer_checked_moves_token2022_via_cpi() {
+    run_forward(&token2022::ID, token2022::add_program, token2022::keyed_account);
+}
+
+#[test]
+fn forward_transfer_checked_rejects_unknown_token_program() {
+    let program_id = Pubkey::new_unique();
+    let mollusk = Mollusk::new(&program_id, "solwallet_cpi");
+    let authority = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let source = Pubkey::new_unique();
+    let destination = Pubkey::new_unique();
+    let (system_program_key, system_program_account) = keyed_account_for_system_program();
+
+    // The System Program is executable but is not a token program — the
+    // forwarder must refuse it before attempting any CPI.
+    let instruction = Instruction::new_with_bytes(
+        program_id,
+        &forward_transfer_checked_data(1, 0),
+        vec![
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new(source, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(system_program_key, false),
+        ],
+    );
+    let accounts = vec![
+        (authority, system_account(1_000_000_000)),
+        (source, token_account(&token::ID, &mint, &authority, 10)),
+        (mint, mint_account(&token::ID, &authority, 0)),
+        (destination, token_account(&token::ID, &mint, &authority, 0)),
+        (system_program_key, system_program_account),
+    ];
+
+    mollusk.process_and_validate_instruction(
+        &instruction,
+        &accounts,
+        &[Check::err(ProgramError::Custom(ERROR_INVALID_TOKEN_PROGRAM))],
+    );
+}
+
+#[test]
+fn forward_transfer_checked_requires_authority_signature() {
+    let program_id = Pubkey::new_unique();
+    let mut mollusk = Mollusk::new(&program_id, "solwallet_cpi");
+    token::add_program(&mut mollusk);
+    let authority = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let source = Pubkey::new_unique();
+    let destination = Pubkey::new_unique();
+
+    let instruction = Instruction::new_with_bytes(
+        program_id,
+        &forward_transfer_checked_data(1, 0),
+        vec![
+            AccountMeta::new_readonly(authority, false), // not a signer
+            AccountMeta::new(source, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(token::ID, false),
+        ],
+    );
+    let accounts = vec![
+        (authority, system_account(1_000_000_000)),
+        (source, token_account(&token::ID, &mint, &authority, 10)),
+        (mint, mint_account(&token::ID, &authority, 0)),
+        (destination, token_account(&token::ID, &mint, &authority, 0)),
+        token::keyed_account(),
+    ];
+
+    mollusk.process_and_validate_instruction(
+        &instruction,
+        &accounts,
+        &[Check::err(ProgramError::MissingRequiredSignature)],
+    );
+}

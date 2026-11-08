@@ -342,6 +342,35 @@ describe("transfer() orchestration (5.5)", () => {
     expect(result.signature).toBe("SIG_TX");
   });
 
+  it("preflight + build read the mint and both ATAs exactly once (no duplicate RPC reads)", async () => {
+    const mint = Keypair.generate().publicKey;
+    const destAta = getAssociatedTokenAddressSync(mint, recipient, true, TOKEN_PROGRAM_ID).toBase58();
+    const { conn, fake } = fakeConn({ mint, existingAtas: [destAta] });
+    const result = await transfer(conn, { from: payer, destination: recipient, mint, amount: 1n, decimals: 6 });
+    expect(result.error).toBeUndefined();
+    expect(result.preflight).toBeDefined();
+    expect(result.destinationAtaExisted).toBe(true);
+    expect(result.destinationAtaCreated).toBe(false);
+    // mint + source ATA + destination ATA — once each, shared by preflight and build.
+    const reads = fake.getAccountInfo.mock.calls.map((c) => (c[0] as PublicKey).toBase58());
+    expect(reads).toHaveLength(3);
+    expect(new Set(reads).size).toBe(3);
+    expect(fake.getLatestBlockhash).toHaveBeenCalledOnce();
+  });
+
+  it("an undecodable mint: preflight degrades to a warning, the builder reuses the mint read", async () => {
+    // The fake's mint has empty data → preflight cannot decode it (PREFLIGHT_INCOMPLETE,
+    // reads only the mint); the builder keeps the owner classification and reads the
+    // source ATA itself — the mint is never fetched twice.
+    const { conn, fake, mint } = fakeConn({ sourceAtaMissing: true });
+    await expect(
+      transfer(conn, { from: payer, destination: recipient, mint, amount: 1n, decimals: 6 }),
+    ).rejects.toMatchObject({ code: "SOURCE_ATA_MISSING" });
+    const reads = fake.getAccountInfo.mock.calls.map((c) => (c[0] as PublicKey).toBase58());
+    expect(reads.filter((a) => a === mint.toBase58())).toHaveLength(1);
+    expect(reads).toHaveLength(2); // mint (preflight) + source ATA (builder)
+  });
+
   it("send failure returns parsed error instead of throwing", async () => {
     const mint = Keypair.generate().publicKey;
     const destAta = getAssociatedTokenAddressSync(

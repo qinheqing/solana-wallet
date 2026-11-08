@@ -152,7 +152,7 @@ export async function executeMixedTransfer(
     );
   }
 
-  const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } = await conn.connection.getLatestBlockhash("confirmed");
   const message = new TransactionMessage({
     payerKey: from.publicKey,
     recentBlockhash: blockhash,
@@ -184,6 +184,7 @@ export async function executeMixedTransfer(
 
   try {
     const sent = await conn.sendWithRetry(tx, {
+      lastValidBlockHeight,
       allowMainnet: opts.allowMainnet,
       policy: opts.policy,
     });

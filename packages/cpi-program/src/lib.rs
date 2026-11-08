@@ -87,6 +87,39 @@
 //! pattern for PDA vaults that hold state, and is strictly cheaper than a
 //! CPI per recipient besides.
 //!
+//! ## `forward_transfer_checked(amount: u64, decimals: u8)` — discriminant `2`
+//!
+//! A pure *forwarder*: the program CPIs `TransferChecked` (instruction
+//! index 12) on the given token program (SPL Token or Token-2022) with the
+//! caller as the source authority. No PDA signing is involved — the only
+//! purpose is that the token movement lands as an **inner** instruction
+//! (`meta.innerInstructions`) so transaction parsers can be exercised
+//! against real CPI-originated token transfers (PRD T-I).
+//!
+//! Data layout (all integers little-endian, hand-rolled — no borsh):
+//!
+//! | bytes | field                 |
+//! |-------|-----------------------|
+//! | 1     | discriminant (`2`)    |
+//! | 8     | amount (u64)          |
+//! | 1     | decimals (u8)         |
+//!
+//! Accounts:
+//!
+//! | index | account                  | flags                                         |
+//! |-------|--------------------------|-----------------------------------------------|
+//! | 0     | authority                | signer (source owner or delegate)             |
+//! | 1     | source token account     | writable                                      |
+//! | 2     | mint                     | readonly                                      |
+//! | 3     | destination token account| writable                                      |
+//! | 4     | token program            | readonly; must be SPL Token or Token-2022     |
+//! | 5..   | extra accounts (optional)| passed through verbatim (e.g. TransferHook)   |
+//!
+//! The token program id is validated against the two known ids; anything
+//! else fails with `ERROR_INVALID_TOKEN_PROGRAM` (0x8). Accounts after the
+//! fifth are appended to the CPI with their own signer/writable flags, which
+//! is what a Token-2022 mint with a TransferHook needs.
+//!
 //! # Custom errors (surface as `custom program error: 0x…`)
 //!
 //! | code | meaning                                               |
@@ -98,11 +131,12 @@
 //! | 0x5  | signer does not match the vault's stored authority      |
 //! | 0x6  | vault already initialized (re-init / takeover attempt)  |
 //! | 0x7  | payout would leave the vault non-zero but below rent-exemption |
+//! | 0x8  | token program account is neither SPL Token nor Token-2022       |
 
 use pinocchio::account_info::AccountInfo;
 use pinocchio::entrypoint;
 use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
-use pinocchio::program::invoke_signed;
+use pinocchio::program::{invoke_signed, slice_invoke};
 use pinocchio::program_error::ProgramError;
 use pinocchio::pubkey::{find_program_address, Pubkey};
 use pinocchio::sysvars::rent::Rent;
@@ -115,6 +149,20 @@ const SYSTEM_PROGRAM_ID: Pubkey = [0u8; 32];
 /// System Program `CreateAccount` instruction discriminant (LE u32 on the wire).
 const SYSTEM_CREATE_ACCOUNT_DISCRIMINANT: u32 = 0;
 
+/// SPL Token program id (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`).
+pub const TOKEN_PROGRAM_ID: Pubkey = [
+    6, 221, 246, 225, 215, 101, 161, 147, 217, 203, 225, 70, 206, 235, 121, 172, 28, 180, 133,
+    237, 95, 91, 55, 145, 58, 140, 245, 133, 126, 255, 0, 169,
+];
+/// Token-2022 program id (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`).
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = [
+    6, 221, 246, 225, 238, 117, 143, 222, 24, 66, 93, 188, 228, 108, 205, 218, 182, 26, 252, 77,
+    131, 185, 13, 39, 254, 189, 249, 40, 216, 161, 139, 252,
+];
+
+/// Token / Token-2022 `TransferChecked` instruction index (shared by both).
+const TOKEN_TRANSFER_CHECKED_DISCRIMINANT: u8 = 12;
+
 /// Seed for the program-controlled SOL vault PDA.
 pub const VAULT_SEED: &[u8] = b"vault";
 
@@ -125,6 +173,8 @@ pub const VAULT_DATA_LEN: usize = 32;
 pub const INSTRUCTION_INITIALIZE_VAULT: u8 = 0;
 /// Discriminant byte for the `batch_transfer` instruction.
 pub const INSTRUCTION_BATCH_TRANSFER: u8 = 1;
+/// Discriminant byte for the `forward_transfer_checked` instruction.
+pub const INSTRUCTION_FORWARD_TRANSFER_CHECKED: u8 = 2;
 
 /// Custom error: vault does not hold enough lamports for the payout.
 pub const ERROR_INSUFFICIENT_FUNDS: u32 = 1;
@@ -141,6 +191,9 @@ pub const ERROR_VAULT_ALREADY_INITIALIZED: u32 = 6;
 /// Custom error: payout would leave the vault non-zero but below the
 /// rent-exempt minimum for its data length.
 pub const ERROR_VAULT_NOT_RENT_EXEMPT: u32 = 7;
+/// Custom error: `forward_transfer_checked` was given a token program
+/// account that is neither SPL Token nor Token-2022.
+pub const ERROR_INVALID_TOKEN_PROGRAM: u32 = 8;
 
 /// Byte size of one `batch_transfer` instruction-data item (32-byte pubkey +
 /// 8-byte lamports).
@@ -150,6 +203,11 @@ const HEADER_SIZE: usize = 3;
 /// `initialize_vault` instruction-data size: 1-byte discriminant + 32-byte
 /// authority pubkey.
 const INITIALIZE_VAULT_DATA_LEN: usize = 1 + 32;
+/// `forward_transfer_checked` instruction-data size: 1-byte discriminant +
+/// 8-byte amount + 1-byte decimals.
+const FORWARD_TRANSFER_CHECKED_DATA_LEN: usize = 1 + 8 + 1;
+/// Fixed (non-pass-through) accounts of `forward_transfer_checked`.
+const FORWARD_TRANSFER_CHECKED_FIXED_ACCOUNTS: usize = 5;
 
 entrypoint!(process_instruction);
 
@@ -165,6 +223,9 @@ pub fn process_instruction(
         }
         Some(&INSTRUCTION_BATCH_TRANSFER) => {
             process_batch_transfer(program_id, instruction_data, accounts)
+        }
+        Some(&INSTRUCTION_FORWARD_TRANSFER_CHECKED) => {
+            process_forward_transfer_checked(instruction_data, accounts)
         }
         _ => Err(ProgramError::InvalidInstructionData),
     }
@@ -388,4 +449,86 @@ fn process_batch_transfer(
     }
 
     Ok(())
+}
+
+/// `forward_transfer_checked`: CPI `TransferChecked` on SPL Token or
+/// Token-2022 with the caller (`authority`) as the signing source owner.
+///
+/// Nothing here is program-signed — the caller's own signature is simply
+/// forwarded to the token program. The instruction exists so a token
+/// transfer can be produced as an *inner* instruction on demand (for
+/// exercising `inspectTransaction`-style parsers), not for custody.
+fn process_forward_transfer_checked(
+    data: &[u8],
+    accounts: &[AccountInfo],
+) -> Result<(), ProgramError> {
+    // ---- Decode instruction data ---------------------------------------
+    if data.len() != FORWARD_TRANSFER_CHECKED_DATA_LEN {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let amount = u64::from_le_bytes(data[1..9].try_into().unwrap());
+    let decimals = data[9];
+
+    // ---- Validate account layout ---------------------------------------
+    // [0] authority (signer) [1] source (w) [2] mint [3] destination (w)
+    // [4] token program [5..] pass-through extras (TransferHook etc.).
+    if accounts.len() < FORWARD_TRANSFER_CHECKED_FIXED_ACCOUNTS {
+        return Err(ProgramError::Custom(ERROR_INVALID_ACCOUNTS));
+    }
+    let authority = &accounts[0];
+    let source = &accounts[1];
+    let mint = &accounts[2];
+    let destination = &accounts[3];
+    let token_program = &accounts[4];
+    let extras = &accounts[FORWARD_TRANSFER_CHECKED_FIXED_ACCOUNTS..];
+
+    if !authority.is_signer() {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if !source.is_writable() || !destination.is_writable() {
+        return Err(ProgramError::Custom(ERROR_INVALID_ACCOUNTS));
+    }
+    let token_program_id = token_program.key();
+    if token_program_id != &TOKEN_PROGRAM_ID && token_program_id != &TOKEN_2022_PROGRAM_ID {
+        return Err(ProgramError::Custom(ERROR_INVALID_TOKEN_PROGRAM));
+    }
+    // Both token programs additionally require source/destination/mint to be
+    // owned by them; we leave that to the callee so its own (well-known)
+    // error codes surface unchanged in the logs.
+
+    // ---- CPI: TransferChecked, hand-rolled ------------------------------
+    //   data     = u8 discriminant (12) + u64-LE amount + u8 decimals
+    //   accounts = [source (w), mint, destination (w), authority (signer),
+    //               extras… (flags copied verbatim)]
+    let mut cpi_data = [0u8; 10];
+    cpi_data[0] = TOKEN_TRANSFER_CHECKED_DISCRIMINANT;
+    cpi_data[1..9].copy_from_slice(&amount.to_le_bytes());
+    cpi_data[9] = decimals;
+
+    let mut cpi_metas: std::vec::Vec<AccountMeta> =
+        std::vec::Vec::with_capacity(4 + extras.len());
+    cpi_metas.push(AccountMeta::writable(source.key()));
+    cpi_metas.push(AccountMeta::readonly(mint.key()));
+    cpi_metas.push(AccountMeta::writable(destination.key()));
+    cpi_metas.push(AccountMeta::readonly_signer(authority.key()));
+    for extra in extras {
+        cpi_metas.push(AccountMeta::new(extra.key(), extra.is_writable(), extra.is_signer()));
+    }
+
+    let mut cpi_infos: std::vec::Vec<&AccountInfo> =
+        std::vec::Vec::with_capacity(4 + extras.len());
+    cpi_infos.push(source);
+    cpi_infos.push(mint);
+    cpi_infos.push(destination);
+    cpi_infos.push(authority);
+    cpi_infos.extend(extras.iter());
+
+    slice_invoke(
+        &Instruction {
+            program_id: token_program_id,
+            accounts: &cpi_metas,
+            data: &cpi_data,
+        },
+        &cpi_infos,
+    )
 }

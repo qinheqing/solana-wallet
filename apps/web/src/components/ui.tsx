@@ -41,8 +41,12 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   );
 }
 
-export function Label({ children }: { children: ReactNode }) {
-  return <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">{children}</label>;
+export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+  return (
+    <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+      {children}
+    </label>
+  );
 }
 
 export function Badge({ children, tone = "default" }: { children: ReactNode; tone?: "default" | "success" | "warn" | "danger" }) {
