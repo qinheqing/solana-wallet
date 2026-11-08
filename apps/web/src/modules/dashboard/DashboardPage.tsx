@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
-import { formatAmount, getWalletBalance, toSafeWalletView, type ClusterHealth, type SafeWalletView, PublicKey } from "../../lib/coreShim";
+import { getWalletBalance, type ClusterHealth, type WalletBalance, PublicKey } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT } from "../../lib/i18n";
 import { Card, ErrorBanner } from "../../components/ui";
+import { AmountValue } from "../../components/Amount";
 
 export function DashboardPage() {
+  const t = useT();
   const { connection, currentWallet } = useApp();
   const [health, setHealth] = useState<ClusterHealth | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
-  const [balance, setBalance] = useState<SafeWalletView | null>(null);
+  const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,7 +37,7 @@ export function DashboardPage() {
     if (!currentWallet) return;
     getWalletBalance(connection, new PublicKey(currentWallet.address))
       .then((b) => {
-        if (!cancelled) setBalance(toSafeWalletView(b));
+        if (!cancelled) setBalance(b);
       })
       .catch((e: unknown) => {
         if (!cancelled) setBalanceError(e instanceof Error ? e.message : String(e));
@@ -46,44 +49,49 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-semibold">Dashboard</h2>
+      <h2 className="text-xl font-semibold">{t("dashboard.title")}</h2>
 
       <Card>
-        <h3 className="mb-3 text-sm font-semibold text-zinc-300">Cluster health</h3>
+        <h3 className="mb-3 text-sm font-semibold text-zinc-300">{t("dashboard.clusterHealth")}</h3>
         {healthError && <ErrorBanner>{healthError}</ErrorBanner>}
-        {!healthError && !health && <div className="text-sm text-zinc-500">Loading…</div>}
+        {!healthError && !health && <div className="text-sm text-zinc-500">{t("common.loading")}</div>}
         {health && (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label="Cluster" value={health.cluster} />
-            <Stat label="Slot" value={health.slot.toLocaleString()} />
-            <Stat label="Version" value={health.version} />
-            <Stat label="TPS (approx)" value={health.tps.toLocaleString()} />
+            <Stat label={t("dashboard.cluster")} value={health.cluster} />
+            <Stat label={t("dashboard.slot")} value={health.slot.toLocaleString()} />
+            <Stat label={t("dashboard.version")} value={health.version} />
+            <Stat label={t("dashboard.tps")} value={health.tps.toLocaleString()} />
           </div>
         )}
       </Card>
 
       <Card>
-        <h3 className="mb-3 text-sm font-semibold text-zinc-300">Current wallet</h3>
-        {!currentWallet && <div className="text-sm text-zinc-500">No wallet selected — go to Wallets.</div>}
+        <h3 className="mb-3 text-sm font-semibold text-zinc-300">{t("dashboard.currentWallet")}</h3>
+        {!currentWallet && <div className="text-sm text-zinc-500">{t("dashboard.noWallet")}</div>}
         {currentWallet && balanceError && <ErrorBanner>{balanceError}</ErrorBanner>}
         {currentWallet && balance && (
           <div className="space-y-3">
             <div className="flex items-baseline gap-2">
-              <span className="font-mono text-sm text-zinc-400">{balance.address}</span>
+              <span className="break-all font-mono text-sm text-zinc-400">{balance.address}</span>
             </div>
-            <div className="text-2xl font-semibold text-emerald-400">{balance.solUi.toFixed(6)} SOL</div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500">{t("dashboard.solBalance")}</div>
+              <div className="text-2xl font-semibold text-emerald-400">
+                <AmountValue raw={balance.solLamports} decimals={9} symbol="SOL" unit={t("common.lamports")} stacked />
+              </div>
+            </div>
             <div>
               <div className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
-                Token accounts ({balance.tokenCount})
+                {t("dashboard.tokenAccounts", { n: balance.tokens.length })}
               </div>
-              {balance.tokens.length === 0 && <div className="text-sm text-zinc-600">None</div>}
+              {balance.tokens.length === 0 && <div className="text-sm text-zinc-600">{t("common.none")}</div>}
               <ul className="space-y-1">
-                {balance.tokens.map((t) => (
-                  <li key={t.mint} className="flex justify-between font-mono text-xs text-zinc-400">
+                {balance.tokens.map((tk) => (
+                  <li key={tk.mint} className="flex flex-wrap justify-between gap-x-3 font-mono text-xs text-zinc-400">
                     <span>
-                      {t.mint.slice(0, 6)}…{t.mint.slice(-6)} ({t.program})
+                      {tk.mint.slice(0, 6)}…{tk.mint.slice(-6)} ({tk.program})
                     </span>
-                    <span>{formatAmount(BigInt(t.amount), t.decimals)}</span>
+                    <AmountValue raw={tk.amount} decimals={tk.decimals} />
                   </li>
                 ))}
               </ul>

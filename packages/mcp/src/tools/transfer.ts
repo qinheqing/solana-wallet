@@ -1,7 +1,9 @@
 /**
  * Transfer tools (F4 surface): single / batch / mixed transfers.
- * Amounts are human-readable strings converted by @solwallet/core exactly;
- * batching / merging orchestration lives entirely in core.
+ * All amounts are integer strings in BASE UNITS (lamports / token base
+ * units); outputs echo the raw value plus a `*Display` hint. Token decimals
+ * are resolved from the mint when omitted. Batching / merging orchestration
+ * lives entirely in core.
  */
 import {
   approveDelegate,
@@ -9,19 +11,27 @@ import {
   buildTransferPlan,
   executeBatchTransfer,
   executeMixedTransfer,
-  parseAmount,
   preflightTransfer,
   revokeDelegate,
-  solToLamports,
   transfer,
   type AtaMode,
   type BatchItem,
   type BuildTransferOptions,
+  type MixedLeg,
   type PreflightResult,
   type TransferInstructionKind,
 } from "@solwallet/core";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
+import {
+  baseUnitParam,
+  DECIMALS_OPTIONAL_DESC,
+  display,
+  parseBaseUnits,
+  resolveDecimals,
+  SOL_DECIMALS,
+  solDisplay,
+} from "../amounts.js";
 import type { ToolDeps } from "../types.js";
 
 type McpServer = import("@modelcontextprotocol/sdk/server/mcp.js").McpServer;
@@ -49,13 +59,13 @@ export function registerTransferTools(
     "transfer",
     {
       description:
-        "Send a single transfer: native SOL (omit mint) or SPL/Token-2022 tokens (provide mint + decimals). Auto-creates the destination token account unless allowAtaCreation=false. Runs preflight_transfer first: block-level findings (transfer hook, memo required, frozen, non-transferable, insufficient balance, authority not a delegate, fee mismatch, unchecked transfer on a fee/hook mint) return error.code=PREFLIGHT_BLOCKED with `preflight.findings` instead of sending — pass force=true to send anyway. Returns signature, slot, fee, plan and preflight; on-chain rejections come back in-band as `error` with `custom` {code, name, programId} (e.g. 36 NoMemo) next to plan and preflight. Delegate / PermanentDelegate transfer (moving another owner's tokens): walletName = the delegate wallet (pays fees and signs as authority), sourceOwner = the owner address whose token account is the source; the owner does NOT sign. Use approve_delegate first for a regular delegate; a Token-2022 PermanentDelegate needs no approval.",
+        "Send a single transfer: native SOL (omit mint) or SPL/Token-2022 tokens (provide mint; decimals optional, read from the mint when omitted). `amount` is BASE UNITS (lamports / token base units). Auto-creates the destination token account unless allowAtaCreation=false. Runs preflight_transfer first: block-level findings (transfer hook, memo required, frozen, non-transferable, insufficient balance, authority not a delegate, fee mismatch, unchecked transfer on a fee/hook mint) return error.code=PREFLIGHT_BLOCKED with `preflight.findings` instead of sending — pass force=true to send anyway. Returns signature, slot, fee, plan and preflight; on-chain rejections come back in-band as `error` with `custom` {code, name, programId} (e.g. 36 NoMemo) next to plan and preflight. Delegate / PermanentDelegate transfer (moving another owner's tokens): walletName = the delegate wallet (pays fees and signs as authority), sourceOwner = the owner address whose token account is the source; the owner does NOT sign. Use approve_delegate first for a regular delegate; a Token-2022 PermanentDelegate needs no approval.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet paying fees. It is also the source owner and transfer authority unless sourceOwner / authorityWallet override them."),
         to: z.string().describe("Recipient address (wallet address for tokens; their ATA is derived automatically)."),
-        amount: z.string().describe("Human-readable amount, e.g. \"1.5\" (SOL) or token units matching decimals."),
+        amount: baseUnitParam(z, "Amount to send"),
         mint: z.string().optional().describe("Token mint address. Omit for native SOL."),
-        decimals: z.number().int().min(0).max(18).optional().describe("Required for token transfers (transferChecked on-chain validation)."),
+        decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
         allowAtaCreation: z.boolean().optional().describe("Auto-create destination token account (~0.002 SOL rent). Default true."),
         dryRun: z.boolean().optional().describe("Simulate only — returns logs without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true to send on mainnet-beta."),
@@ -77,7 +87,8 @@ export function registerTransferTools(
       const from = resolveFrom(deps, args.walletName);
       const authority = args.authorityWallet ? resolveFrom(deps, args.authorityWallet) : undefined;
       const base = baseUnits(args);
-      const options = buildOptions(from.publicKey, args, base);
+      const decimals = await resolveDecimals(conn, args.mint, args.decimals);
+      const options = buildOptions(from.publicKey, args, base, decimals);
 
       // One pipeline for every caller: core transfer() runs preflight →
       // build → signer check → sign → dryRun | send, and reports failures
@@ -109,6 +120,7 @@ export function registerTransferTools(
         signature: result.signature,
         slot: result.slot,
         feeLamports: result.feeLamports,
+        feeDisplay: solDisplay(result.feeLamports),
         logs: result.logs,
         unitsConsumed: result.unitsConsumed,
         ...(result.error ? { error: result.error } : {}),
@@ -116,8 +128,10 @@ export function registerTransferTools(
         destinationAtaCreated: result.destinationAtaCreated,
         destinationAtaExisted: result.destinationAtaExisted,
         amountBaseUnits: base.toString(),
+        amountDisplay: amountDisplay(base, args.mint, decimals),
+        decimals: decimals ?? null,
         ...(result.plan ? { plan: result.plan } : {}),
-        ...(result.preflight ? { preflight: result.preflight } : {}),
+        ...(result.preflight ? { preflight: withFeeDisplay(result.preflight, decimals) } : {}),
       };
     }),
   );
@@ -130,9 +144,9 @@ export function registerTransferTools(
       inputSchema: {
         walletName: z.string().describe("Loaded wallet used as fee payer (and default source owner / authority)."),
         to: z.string().describe("Recipient address (wallet address for tokens; their ATA is derived automatically)."),
-        amount: z.string().describe("Human-readable amount, e.g. \"1.5\" (SOL) or token units matching decimals."),
+        amount: baseUnitParam(z, "Amount to send"),
         mint: z.string().optional().describe("Token mint address. Omit for native SOL (always ok)."),
-        decimals: z.number().int().min(0).max(18).optional().describe("Required for token transfers."),
+        decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
         allowAtaCreation: z.boolean().optional().describe("With ataMode auto: whether a missing destination ATA would be created. Default true."),
         cluster: clusterParam(z, deps),
         ...constructionKnobs(z),
@@ -145,15 +159,18 @@ export function registerTransferTools(
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
       const base = baseUnits(args);
+      const decimals = await resolveDecimals(conn, args.mint, args.decimals);
       const result: PreflightResult = await preflightTransfer(conn, {
-        ...buildOptions(from.publicKey, args, base),
+        ...buildOptions(from.publicKey, args, base, decimals),
         authority: args.authority ? new PublicKey(args.authority) : undefined,
       });
-      const { resolved, ...rest } = result;
+      const { resolved, ...rest } = withFeeDisplay(result, decimals);
       return {
         ...rest,
         blocking: rest.findings.filter((f) => f.severity === "block").map((f) => f.code),
         amountBaseUnits: base.toString(),
+        amountDisplay: amountDisplay(base, args.mint, decimals),
+        decimals: decimals ?? null,
         program: resolved?.program ?? "system",
         mint: resolved?.mint ?? null,
         sourceAta: resolved?.sourceAta ?? null,
@@ -171,9 +188,9 @@ export function registerTransferTools(
       inputSchema: {
         walletName: z.string().describe("Loaded wallet used as fee payer (and default source owner / authority)."),
         to: z.string().describe("Recipient address (wallet address for tokens; their ATA is derived automatically)."),
-        amount: z.string().describe("Human-readable amount, e.g. \"1.5\" (SOL) or token units matching decimals."),
+        amount: baseUnitParam(z, "Amount to send"),
         mint: z.string().optional().describe("Token mint address. Omit for native SOL."),
-        decimals: z.number().int().min(0).max(18).optional().describe("Required for token transfers."),
+        decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
         allowAtaCreation: z.boolean().optional().describe("With ataMode auto: create the destination ATA when missing. Default true."),
         cluster: clusterParam(z, deps),
         ...constructionKnobs(z),
@@ -186,8 +203,9 @@ export function registerTransferTools(
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
       const base = baseUnits(args);
+      const decimals = await resolveDecimals(conn, args.mint, args.decimals);
       const { built, plan } = await buildTransferPlan(conn, {
-        ...buildOptions(from.publicKey, args, base),
+        ...buildOptions(from.publicKey, args, base, decimals),
         authority: args.authority ? new PublicKey(args.authority) : undefined,
       });
       return {
@@ -196,6 +214,8 @@ export function registerTransferTools(
         destinationAtaExisted: built.destinationAtaExisted,
         destinationAta: built.destinationAta?.toBase58() ?? null,
         amountBaseUnits: base.toString(),
+        amountDisplay: amountDisplay(base, args.mint, decimals),
+        decimals: decimals ?? null,
         labels: built.labels,
         plan,
       };
@@ -212,30 +232,34 @@ export function registerTransferTools(
         walletName: z.string().describe("Loaded wallet that OWNS the token account; pays the fee and signs the approval."),
         mint: z.string().describe("Token mint address."),
         delegate: z.string().describe("Address allowed to transfer from the owner's token account."),
-        amount: z.string().describe("Human-readable allowance, e.g. \"12.5\", converted with `decimals`."),
-        decimals: z.number().int().min(0).max(18).describe("Mint decimals (ApproveChecked validates them on chain)."),
+        amount: baseUnitParam(z, "Allowance"),
+        decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
         allowMainnet: z.literal(true).optional().describe("Required literal true to send on mainnet-beta."),
         cluster: clusterParam(z, deps),
       },
     },
-    run(async (args: { walletName: string; mint: string; delegate: string; amount: string; decimals: number; allowMainnet?: boolean; cluster?: string }) => {
+    run(async (args: { walletName: string; mint: string; delegate: string; amount: string; decimals?: number; allowMainnet?: boolean; cluster?: string }) => {
       const conn = connections.get(args.cluster);
       const owner = resolveFrom(deps, args.walletName);
-      const amount = parseAmount(args.amount, args.decimals);
+      const amount = parseBaseUnits(args.amount, "amount", { decimals: args.decimals, kind: "token" });
+      const decimals = (await resolveDecimals(conn, args.mint, args.decimals))!;
       const res = await approveDelegate(conn, {
         owner,
         mint: new PublicKey(args.mint),
         delegate: new PublicKey(args.delegate),
         amount,
-        decimals: args.decimals,
+        decimals,
         allowMainnet: args.allowMainnet,
       });
       return {
         ok: res.error === undefined,
         ...res,
+        feeDisplay: solDisplay(res.feeLamports),
         owner: owner.publicKey.toBase58(),
         delegate: args.delegate,
         amountBaseUnits: amount.toString(),
+        amountDisplay: display(amount, decimals),
+        decimals,
       };
     }),
   );
@@ -260,7 +284,7 @@ export function registerTransferTools(
         mint: new PublicKey(args.mint),
         allowMainnet: args.allowMainnet,
       });
-      return { ok: res.error === undefined, ...res, owner: owner.publicKey.toBase58() };
+      return { ok: res.error === undefined, ...res, feeDisplay: solDisplay(res.feeLamports), owner: owner.publicKey.toBase58() };
     }),
   );
 
@@ -268,21 +292,21 @@ export function registerTransferTools(
     "batch_transfer",
     {
       description:
-        "Send one token/SOL amount pattern to many recipients. Core splits them into size-aware batches (instruction count + 1232-byte budget) sent serially; each batch reports per-recipient results.",
+        "Send one token/SOL amount pattern to many recipients. Amounts are BASE UNITS (lamports / token base units). Core splits them into size-aware batches (instruction count + 1232-byte budget) sent serially; each batch reports per-recipient results.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet paying fees and sending funds."),
         recipients: z
           .array(
             z.object({
               to: z.string().describe("Recipient address."),
-              amount: z.string().describe("Human-readable amount for THIS recipient."),
+              amount: baseUnitParam(z, "Amount for THIS recipient"),
             }),
           )
           .min(1)
           .max(50)
           .describe("1–50 recipients."),
         mint: z.string().optional().describe("Token mint. Omit for SOL."),
-        decimals: z.number().int().optional().describe("Required for token transfers."),
+        decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
         chunkSize: z
           .number()
           .int()
@@ -308,22 +332,30 @@ export function registerTransferTools(
     }) => {
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
+      if (!args.mint && args.decimals !== undefined) {
+        throw new Error("decimals is only valid for token transfers.");
+      }
       const mint = args.mint ? new PublicKey(args.mint) : undefined;
+      const decimals = await resolveDecimals(conn, args.mint, args.decimals);
 
-      // Exact amount conversion stays at the MCP layer; instruction
-      // building + splitting + sending are core responsibilities.
+      // Amounts arrive as base units; instruction building + splitting +
+      // sending are core responsibilities.
       const items: BatchItem[] = [];
-      for (const r of args.recipients) {
-        const amount = mint ? parseAmount(r.amount, args.decimals ?? 0) : solToLamports(r.amount);
+      const amounts: bigint[] = [];
+      args.recipients.forEach((r, i) => {
+        amounts.push(parseBaseUnits(r.amount, `recipients[${i}].amount`, { decimals, kind: mint ? "token" : "SOL" }));
+      });
+      for (const [i, r] of args.recipients.entries()) {
         const built = await buildTransferInstructions(conn, {
           payer: from.publicKey,
           destination: new PublicKey(r.to),
           mint,
-          amount,
-          decimals: args.decimals,
+          amount: amounts[i]!,
+          decimals,
         });
         items.push({ destination: new PublicKey(r.to), instructions: built.instructions });
       }
+      const amountByTo = new Map(args.recipients.map((r, i) => [r.to, amounts[i]!] as const));
 
       const batches = await executeBatchTransfer(conn, from, items, {
         maxInstructionsPerTx: args.chunkSize,
@@ -345,6 +377,7 @@ export function registerTransferTools(
           signatures: b.signatures,
           slot: b.slot,
           feeLamports: b.feeLamports,
+          feeDisplay: solDisplay(b.feeLamports),
           logs: b.logs,
           failedChunk: firstFailure !== undefined,
           ...(firstFailure?.error
@@ -358,6 +391,8 @@ export function registerTransferTools(
             to: r.to,
             status: r.status,
             signature: r.signature,
+            amount: amountByTo.get(r.to)?.toString() ?? null,
+            amountDisplay: amountDisplay(amountByTo.get(r.to) ?? null, args.mint, decimals),
             ...(r.error
               ? { code: r.error.code, message: r.error.message, suggestion: r.error.suggestion }
               : {}),
@@ -368,6 +403,8 @@ export function registerTransferTools(
       const skipped = chunks.reduce((n, c) => n + c.results.filter((r) => r.status === "skipped").length, 0);
       return {
         totalRecipients: args.recipients.length,
+        mint: args.mint ?? null,
+        decimals: decimals ?? null,
         chunks,
         skippedRecipients: skipped,
         summary:
@@ -382,7 +419,7 @@ export function registerTransferTools(
     "mixed_transfer",
     {
       description:
-        "One transaction containing multiple legs: native SOL plus any number of different SPL/Token-2022 mints. All legs share one signature.",
+        "One transaction containing multiple legs: native SOL plus any number of different SPL/Token-2022 mints. All legs share one signature. Leg amounts are BASE UNITS (lamports for sol legs, token base units for token legs).",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet paying fees and sending funds."),
         legs: z
@@ -390,9 +427,9 @@ export function registerTransferTools(
             z.object({
               kind: z.enum(["sol", "token"]).describe("Leg type."),
               to: z.string().describe("Recipient address."),
-              amount: z.string().describe("Human-readable amount (SOL units for sol legs)."),
+              amount: baseUnitParam(z, "Amount for this leg"),
               mint: z.string().optional().describe("Mint address — REQUIRED for token legs, omit for sol legs."),
-              decimals: z.number().int().min(0).max(18).optional().describe("Mint decimals — REQUIRED for token legs, omit for sol legs."),
+              decimals: z.number().int().min(0).max(18).optional().describe("Mint decimals — token legs only (resolved from the mint when omitted; passing it saves one RPC read). Invalid on sol legs."),
             }),
           )
           .min(2)
@@ -420,26 +457,36 @@ export function registerTransferTools(
       args.legs.forEach((leg, i) => {
         if (leg.kind === "token") {
           if (!leg.mint) {
-            throw new Error(`legs[${i}]: token legs require "mint" (and "decimals").`);
-          }
-          if (leg.decimals === undefined) {
-            throw new Error(`legs[${i}]: token legs require "decimals" (mint ${leg.mint}).`);
+            throw new Error(`legs[${i}]: token legs require "mint".`);
           }
         } else if (leg.mint !== undefined || leg.decimals !== undefined) {
           throw new Error(`legs[${i}]: mint/decimals are only valid for token legs (kind: "token").`);
         }
       });
 
-      // Amount strings → exact base units here; validation, instruction
-      // building (program dispatch + ATA), size guard and sending are core.
-      const legs = args.legs.map((leg) => ({
-        kind: leg.kind,
-        to: new PublicKey(leg.to),
-        amount:
-          leg.kind === "sol" ? solToLamports(leg.amount) : parseAmount(leg.amount, leg.decimals ?? 0),
-        mint: leg.kind === "token" && leg.mint ? new PublicKey(leg.mint) : undefined,
-        decimals: leg.decimals,
-      }));
+      // Amounts are base units already; decimals are resolved per token leg
+      // (one read per distinct mint) when not supplied. Validation,
+      // instruction building (program dispatch + ATA), size guard and
+      // sending are core.
+      const decimalsByMint = new Map<string, number>();
+      const legs: Array<MixedLeg & { mint?: PublicKey }> = [];
+      for (const [i, leg] of args.legs.entries()) {
+        let decimals: number | undefined;
+        if (leg.kind === "token" && leg.mint) {
+          decimals = leg.decimals ?? decimalsByMint.get(leg.mint);
+          if (decimals === undefined) {
+            decimals = await resolveDecimals(conn, leg.mint, undefined);
+          }
+          decimalsByMint.set(leg.mint, decimals!);
+        }
+        legs.push({
+          kind: leg.kind,
+          to: new PublicKey(leg.to),
+          amount: parseBaseUnits(leg.amount, `legs[${i}].amount`, { decimals, kind: leg.kind === "sol" ? "SOL" : "token" }),
+          mint: leg.kind === "token" && leg.mint ? new PublicKey(leg.mint) : undefined,
+          decimals,
+        });
+      }
 
       const result = await executeMixedTransfer(conn, from, legs, {
         dryRun: args.dryRun,
@@ -451,14 +498,17 @@ export function registerTransferTools(
         signature: result.signature,
         slot: result.slot,
         feeLamports: result.feeLamports,
+        feeDisplay: solDisplay(result.feeLamports),
         logs: result.logs,
         unitsConsumed: result.unitsConsumed,
         ...(result.error ? { error: result.error } : {}),
         legs: result.legs.map((l, i) => ({
           kind: l.kind,
           to: l.to,
-          amount: args.legs[i]?.amount ?? l.amountBaseUnits,
+          amount: l.amountBaseUnits,
           amountBaseUnits: l.amountBaseUnits,
+          amountDisplay: amountDisplay(l.amountBaseUnits, legs[i]?.mint?.toBase58(), legs[i]?.decimals),
+          decimals: legs[i]?.decimals ?? null,
           program: l.program,
           destinationAtaCreated: l.destinationAtaCreated,
           destinationAta: l.destinationAta,
@@ -514,15 +564,46 @@ function constructionKnobs(z: typeof import("zod").z) {
   };
 }
 
-/** Exact conversion: SOL via lamports; tokens via decimals-aware parse. */
+/** Base-unit input → bigint; `decimals` is only meaningful with a mint. */
 function baseUnits(args: TransferArgs): bigint {
   if (!args.mint && args.decimals !== undefined) {
     throw new Error("decimals is only valid for token transfers.");
   }
-  return args.mint ? parseAmount(args.amount, args.decimals ?? 0) : solToLamports(args.amount);
+  return parseBaseUnits(args.amount, "amount", { decimals: args.decimals, kind: args.mint ? "token" : "SOL" });
 }
 
-function buildOptions(payer: PublicKey, args: TransferArgs & KnobArgs, base: bigint): BuildTransferOptions {
+/** "1.5 SOL" for SOL, "1.5 (6 dp)" for tokens with known decimals, null otherwise. */
+function amountDisplay(base: bigint | string | null, mint: string | undefined, decimals: number | undefined): string | null {
+  if (base === null) return null;
+  return mint ? display(base, decimals) : display(base, SOL_DECIMALS, "SOL");
+}
+
+/**
+ * Add `expectedFeeDisplay` / `netDisplay` / `amountDisplay` next to the raw
+ * base-unit figures of TRANSFER_FEE / FEE_MISMATCH findings.
+ */
+function withFeeDisplay<T extends { findings: PreflightResult["findings"] }>(result: T, decimals: number | undefined): T {
+  if (decimals === undefined) return result;
+  return {
+    ...result,
+    findings: result.findings.map((f) => {
+      if ((f.code !== "TRANSFER_FEE" && f.code !== "FEE_MISMATCH") || !f.data) return f;
+      const d = f.data as Record<string, unknown>;
+      const str = (k: string): string | null => (typeof d[k] === "string" ? (d[k] as string) : null);
+      return {
+        ...f,
+        data: {
+          ...d,
+          amountDisplay: display(str("amount"), decimals),
+          expectedFeeDisplay: display(str("expectedFee"), decimals),
+          netDisplay: display(str("net"), decimals),
+        },
+      };
+    }),
+  };
+}
+
+function buildOptions(payer: PublicKey, args: TransferArgs & KnobArgs, base: bigint, decimals: number | undefined): BuildTransferOptions {
   const computeBudget =
     args.computeUnitLimit !== undefined || args.computeUnitPrice !== undefined
       ? { unitLimit: args.computeUnitLimit, unitPrice: args.computeUnitPrice }
@@ -539,7 +620,7 @@ function buildOptions(payer: PublicKey, args: TransferArgs & KnobArgs, base: big
     destination: new PublicKey(args.to),
     mint: args.mint ? new PublicKey(args.mint) : undefined,
     amount: base,
-    decimals: args.decimals,
+    decimals,
     allowAtaCreation: args.allowAtaCreation,
     computeBudget,
     ataMode: args.ataMode,

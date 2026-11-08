@@ -12,7 +12,7 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 分组 | 工具 | 一句话 |
 |---|---|---|
 | 钱包（4） | `create_wallet` `import_wallet` `list_wallets` `export_secret` | 内存钱包的生命周期 |
-| 集群（3） | `get_cluster_status` `request_airdrop` `get_balances` | 健康、水龙头、余额（余额只给 raw `amount`，没有 `uiAmount`） |
+| 集群（3） | `get_cluster_status` `request_airdrop` `get_balances` | 健康、水龙头（`lamports`）、余额（raw `solLamports` / `amount` + `solDisplay` / `display` 提示，没有 `uiAmount`） |
 | 发送（3） | `transfer` `batch_transfer` `mixed_transfer` | 真正上链的转账；`transfer` 自带预检与全部构造旋钮 |
 | 观察（3） | `derive_address` `inspect_mint` `inspect_token_account` | 只读：ATA 推导（离线）、mint 扩展解码、代币账户扩展解码 |
 | 构造（1） | `build_transfer` | 只构造不签不发：指令列表 + message hex + signers |
@@ -35,9 +35,9 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 看当前加载了哪些钱包 | `list_wallets` | 无参数，随时可调 |
 | 备份 / 导出密钥 | `export_secret` | 仅用户明确要求时；`format: "keyfileJson"` 或 `"mnemonic"` + `dangerouslyAllowSecretExport: true` |
 | 集群健康（slot / 版本 / TPS） | `get_cluster_status` | 排查连接问题的第一步 |
-| 领测试 SOL | `request_airdrop` | mainnet-beta 直接拒绝；公共水龙头 410 见下文 |
-| 查余额（SOL + 全部代币） | `get_balances` | 含 SPL 与 Token-2022 账户；代币余额是 raw base units |
-| 单笔转账 | `transfer` | 代币转账 `mint` + `decimals` 必传；默认先预检，block 级发现返回 `PREFLIGHT_BLOCKED` |
+| 领测试 SOL | `request_airdrop` | `lamports` 传 base units（1 SOL = `"1000000000"`）；mainnet-beta 直接拒绝；公共水龙头 410 见下文 |
+| 查余额（SOL + 全部代币） | `get_balances` | 含 SPL 与 Token-2022 账户；`solLamports` / 代币 `amount` 是 raw base units，旁边 `solDisplay` / `display` 是可读提示 |
+| 单笔转账 | `transfer` | `amount` 是 base units；代币转账传 `mint`（`decimals` 可省，自动从 mint 读）；默认先预检，block 级发现返回 `PREFLIGHT_BLOCKED` |
 | 一对多批量 | `batch_transfer` | 1–50 接收者，自动分块串行 |
 | 多资产打包一笔 | `mixed_transfer` | 2–10 条腿，共享一个签名 |
 | 发送前验证 | 任何发送工具 + `dryRun: true` | 只模拟，返回日志 |
@@ -49,13 +49,13 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 看某个代币账户状态 / 是否要求 memo / 扣留费 | `inspect_token_account` | 传 ATA 地址（不是钱包地址，先 `derive_address`） |
 | 解析一笔交易到底转了多少、扣了多少、为什么失败 | `inspect_transaction` | `signature`（在线）或 `json`（离线，粘 getTransaction 结果） |
 | 创建代币（SPL 或 Token-2022） | `create_token` | 给 `preset` 可省 `decimals`；`mintTo` 一步铸给指定钱包；返回 `mint` |
-| 铸造 / 销毁代币 | `manage_token2022` + `action: "mintTokens"` / `"burnTokens"` | SPL 与 Token-2022 通用；`params.amount` 是 **base units** 整数串 |
+| 铸造 / 销毁代币 | `manage_token2022` + `action: "mintTokens"` / `"burnTokens"` | SPL 与 Token-2022 通用；`params.amount` 和所有金额一样是 base units 整数串 |
 | 改费率 / 冻结解冻 / 换权限 / 改元数据 / 改显示倍率 / 改 hook 程序 | `manage_token2022` + 对应 `action` | 仅 Token-2022 mint；调用方钱包必须是对应 authority |
 | 让自己的收款账户强制要 memo | `manage_token2022` + `enableMemoTransfer` / `disableMemoTransfer` | 作用于**调用钱包自己的 ATA**（必要时自动创建并 realloc） |
 | 收转账费 | `manage_token2022` + `withdrawWithheldFromAccounts` / `harvestWithheldToMint` / `withdrawWithheldFromMint` | `sources` 传代币**账户**地址，不是钱包地址 |
 | 授权别人替我转 / 撤销 | `approve_delegate` / `revoke_delegate` | 之后 delegate 用 `transfer` + `sourceOwner` 划转 |
 | 替别人转（delegate / PermanentDelegate） | `transfer` + `walletName=<delegate>` + `sourceOwner=<owner>` | owner 不签名；PermanentDelegate 无需事先 approve |
-| 制造一笔"CPI 内层"代币转账（测解析器） | `cpi_token_transfer` | `programId` 必传（已部署的 `solwallet_cpi`）；`amount` 人类可读 + `decimals`；钱包自己是源 authority，无 PDA 托管 |
+| 制造一笔"CPI 内层"代币转账（测解析器） | `cpi_token_transfer` | `programId` 必传（已部署的 `solwallet_cpi`）；`amount` 是 base units，`decimals` 可省；钱包自己是源 authority，无 PDA 托管 |
 | 创建多签 | `create_multisig` | 记下返回的 `multisigPda`（后续工具要用）与 `vaultPda`（先给它打 SOL） |
 | 多签发起转账 | `propose_multisig` | 从金库转出 SOL / 代币；记下 `transactionIndex` |
 | 多签投票 | `approve_multisig` | 每个成员各用自己的 `walletName` 调一次；达阈值后 `executeReady: true` |
@@ -66,10 +66,10 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 
 ## 参数约定
 
-- **转账类金额是人类可读字符串**：`"1.5"`、`"0.01"`。不要传 lamports / base units，不要用科学计数法，不要传数字类型。内部精确换算，精度超出 decimals 会报 `AMOUNT_TOO_PRECISE`。适用：`transfer.amount`、`build_transfer.amount`、`preflight_transfer.amount`、`batch_transfer.recipients[].amount`、`mixed_transfer.legs[].amount`、`propose_multisig.amount`、`approve_delegate.amount`、`request_airdrop.sol`。
-- **输出里的金额一律是 raw base units 字符串**（`amount`、`amountBaseUnits`、`balanceDelta`、`fee.amount`、`supply`、`withheldAmount`、`expectedFee`、`net`……）。MCP 输出**永远不含 `uiAmount`**；要给用户看人类可读数，自己按 `decimals` 换算，ScaledUiAmount 的倍率也不会被套用。
+- **所有金额都是 base units 整数字符串**（和区块浏览器一致），见下文「金额单位：只有一条规则」。不要传 `"1.5"` 这种人类可读数，不要用科学计数法，不要传数字类型——schema 直接拒绝并提示 base units。
+- **输出里的金额同样是 raw base units 字符串**（`amount`、`amountBaseUnits`、`solLamports`、`feeLamports`、`balanceDelta`、`fee.amount`、`supply`、`withheldAmount`、`expectedFee`、`net`……），**永远不含 `uiAmount`**。较大的金额旁边会多一个 `*Display` 字段给人看（`amountDisplay`、`solDisplay`、`feeDisplay`、`expectedFeeDisplay`、`netDisplay`、`supplyDisplay`、`balanceDeltaDisplay`、余额里的 `display`），形如 `"1.5 SOL"` / `"0.25 (6 dp)"`。`*Display` 只用于复述给用户，**不要把它回传给任何工具**；ScaledUiAmount 的倍率不会被套用。
 - **`overwrite`**（`create_wallet` / `import_wallet`）：默认 `false`，同名钱包已加载时报 `INVALID_INPUT`（"already exists"）。不要自动加 `overwrite: true` 绕过——旧密钥会被丢弃，先问用户是换个名字还是确认替换。
-- **decimals 只在代币转账时传**：`transfer` 带 `mint` 时 `decimals` 必传（0–18，链上 transferChecked 校验）；SOL 转账传 `decimals` 会直接报错。
+- **decimals 可选，且只对代币有意义**：带 `mint` 的工具（`transfer` / `build_transfer` / `preflight_transfer` / `batch_transfer` / `mixed_transfer` 的 token 腿 / `approve_delegate` / `propose_multisig` / `cpi_token_transfer`）省略 `decimals` 时会自动从 mint 读取（多一次 RPC 读）；传了就直接用（省一次读，但传错会在链上被 transferChecked 拒绝，不会被纠正）。`decimals` **不参与金额换算**——金额永远是 base units。SOL 操作传 `decimals` 会直接报错。
 - **`walletName` vs `address`**：操作已加载的钱包用 `walletName`；操作外部地址（如给任意地址查余额、空投）用 `address`。二者提供其一。
 - **`cluster`**：可选，接受官方名（`devnet` / `testnet` / `mainnet-beta`）或**完整 RPC URL**（含 `http://127.0.0.1:8899`）。省略时用服务器默认。临时换集群不需要用户改配置，直接在调用里传 URL。
 - **`allowAtaCreation`**（仅 `ataMode: "auto"` 时有意义）：默认 `true`，接收方无代币账户时自动创建（约 0.002 SOL 租金，由发送方支付）。接收方是程序派生地址等特殊场景才需要关掉。
@@ -86,26 +86,41 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | `computeUnitLimit` / `computeUnitPrice` | 不加 | 置顶插入 `setComputeUnitLimit` / `setComputeUnitPrice`（price 单位 microLamports/CU） |
 | `ataMode` | `auto` | `auto` 缺 ATA 才加幂等创建；`always-idempotent` 恒加幂等创建；`create` 加非幂等 Create（ATA 已存在则链上失败）；`none` 不加也不报 `ATA_MISSING`。结果里 `destinationAtaCreated` 表示本笔**真的会**创建（账户原本不存在且带创建指令），`destinationAtaExisted` 表示构造时账户是否已存在（`none` 不查链则为 `null`） |
 | `instruction` | `transferChecked` | `transfer` = 旧式不校验（Token-2022 mint 带 TransferFeeConfig / TransferHook 时链上必败 custom 31，预检 `UNCHECKED_TRANSFER_REJECTED` 拦截）；`transferCheckedWithFee` = Token-2022 费率专用，必须同时传 `fee` |
-| `fee` | — | base units 整数串，必须等于 mint 当前档位算出的费，否则链上 `FeeMismatch`（预检 `FEE_MISMATCH` 直接拦截，`force` 可越过） |
+| `fee` | — | base units 整数串（和所有金额一样），必须等于 mint 当前档位算出的费，否则链上 `FeeMismatch`（预检 `FEE_MISMATCH` 直接拦截，`force` 可越过） |
 | `memo` | — | 在转账指令前插一条 Memo 程序指令；MemoTransfer 收款账户必需 |
 | `sourceOwner` | `walletName` 地址 | 源 ATA 的 owner 不是调用钱包时传（delegate / PermanentDelegate 划转） |
 | `authorityWallet`（仅 `transfer`） / `authority`（`build` / `preflight`） | `walletName` | 签 transfer 指令的权限方不是付费钱包时传；`transfer` 需要那个钱包已加载并会被要求共同签名 |
 | `force`（仅 `transfer`） | `false` | 跳过 block 级预检直接发，让 validator 预检兜底；findings 仍随结果返回 |
 | `skipPreflight`（仅 `transfer`） | `false` | 完全不做本地预检（少几次 RPC 读），结果里没有 `preflight` |
 
-## 金额单位例外（base units）
+## 金额单位：只有一条规则（base units）
 
-下面这些字段**不是**人类可读金额，而是 base units 整数字符串（`人类可读数量 × 10^decimals`，不含小数点）。传 `"1.5"` 会直接报 `INVALID_INPUT`：
+**所有工具的所有金额输入都是 base units 整数字符串**——lamports 或代币最小单位，不含小数点，和区块浏览器显示的 raw 值一致。没有例外，不存在"人类可读"的字段。
 
-| 工具 | 字段 |
-|---|---|
-| `create_token` | `extensions.transferFeeConfig.maximumFee`、`mintTo.amount` |
-| `manage_token2022` | `params.amount`（`mintTokens` / `burnTokens`）、`params.maximumFee`（`setTransferFee`） |
-| `transfer` / `build_transfer` / `preflight_transfer` | `fee`（配合 `instruction: "transferCheckedWithFee"`） |
+| 资产 | 换算 | 例子 |
+|---|---|---|
+| SOL | `lamports = SOL × 10^9` | 1 SOL → `"1000000000"`；0.5 SOL → `"500000000"`；0.01 SOL → `"10000000"` |
+| 代币 | `base units = 数量 × 10^decimals` | decimals = 6 时 1.5 个 → `"1500000"`；0.01 个 → `"10000"`；decimals = 9 时 2 个 → `"2000000000"` |
 
-例：decimals = 6 的代币，铸 1.5 个 → `"amount": "1500000"`；最高手续费 0.01 个 → `"maximumFee": "10000"`。不知道 decimals 时用 `inspect_mint` 查，或 `get_balances` 返回里的代币信息。
+适用字段：`transfer.amount`、`build_transfer.amount`、`preflight_transfer.amount`、`batch_transfer.recipients[].amount`、`mixed_transfer.legs[].amount`（sol 腿是 lamports）、`approve_delegate.amount`、`propose_multisig.amount`、`cpi_token_transfer.amount`、`request_airdrop.lamports`、`create_token.mintTo.amount`、`create_token.extensions.transferFeeConfig.maximumFee`、`manage_token2022.params.amount` / `params.maximumFee`、`fee`。
 
-注意对比：`approve_delegate.amount` 走**人类可读**单位（和 `transfer.amount` 一样，配 `decimals` 换算，`"0.5"` = 半个代币），而 `create_token.mintTo.amount`、`fee`、`manage_token2022` 的 `params.amount` / `params.maximumFee` 是 base units。
+传 `"1.5"`、`"-5"`、`"1e9"` 一律被 schema 拒绝（错误文本带 "base units" 和换算示例）；`"0"` 过 schema 但报 `INVALID_INPUT`（必须 > 0）。不知道 decimals 时用 `inspect_mint`（返回 `decimals` 与 `supplyDisplay`）或 `get_balances` 里的代币条目；用户说"转 1.5 个"时，先查 decimals 再算 base units，复述时用返回里的 `*Display`。
+
+输出约定：原始字段保持 raw（`amountBaseUnits`、`solLamports`、`feeLamports`、`amount`……），旁边多一个同名 `*Display`：
+
+| 工具 | raw 字段 | 提示字段 |
+|---|---|---|
+| `transfer` / `build_transfer` / `preflight_transfer` / `cpi_token_transfer` / `approve_delegate` / `propose_multisig` | `amountBaseUnits`、`feeLamports`、`decimals` | `amountDisplay`、`feeDisplay` |
+| `preflight_transfer` 的 `TRANSFER_FEE` / `FEE_MISMATCH` finding | `data.amount` / `expectedFee` / `net` | `data.amountDisplay` / `expectedFeeDisplay` / `netDisplay` |
+| `batch_transfer` | `chunks[].results[].amount`、`chunks[].feeLamports` | `amountDisplay`、`feeDisplay` |
+| `mixed_transfer` | `legs[].amount`（= `amountBaseUnits`） | `legs[].amountDisplay` |
+| `request_airdrop` | `lamports` | `solDisplay` |
+| `get_balances` | `solLamports`、`tokens[].amount` | `solDisplay`、`tokens[].display` |
+| `inspect_mint` / `inspect_token_account` | `supply` / `amount`、`delegatedAmount` | `supplyDisplay` / `amountDisplay`、`delegatedAmountDisplay` |
+| `inspect_transaction` | `fee`、`movements[].amount` / `fee.amount` / `balanceDelta`、`balanceChanges[].delta` | `feeDisplay`、`amountDisplay` / `feeDisplay` / `balanceDeltaDisplay`、`deltaDisplay` |
+| `create_token` / `manage_token2022`（mint / burn） | `mintTo.amount` / `amount`、`feeLamports` | `amountDisplay`、`feeDisplay` |
+
+小数值（computeUnitPrice、以 base units 计的 `fee` 输入等）没有提示字段，raw 数字本身就够读。
 
 ## 预检代码参考（`preflight_transfer` / `transfer.preflight`）
 
@@ -137,11 +152,11 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 
 ```
 create_wallet   { "name": "alice" }                      → 记下 address
-request_airdrop { "walletName": "alice", "sol": "2" }    → signature
+request_airdrop { "walletName": "alice", "lamports": "2000000000" }   → signature（2 SOL）
 create_wallet   { "name": "bob" }                        → 记下 address
-transfer        { "walletName": "alice", "to": "<bob地址>", "amount": "0.5" }
+transfer        { "walletName": "alice", "to": "<bob地址>", "amount": "500000000" }   ← 0.5 SOL，lamports
 get_balances    { "walletName": "alice" }
-get_balances    { "walletName": "bob" }                  → 应 ≈ 0.5 SOL
+get_balances    { "walletName": "bob" }                  → solLamports "500000000"，solDisplay "0.5 SOL"
 ```
 
 airdrop 失败（`FAUCET_UNAVAILABLE`）走下文水龙头章节，不要反复重试。
@@ -152,15 +167,15 @@ airdrop 失败（`FAUCET_UNAVAILABLE`）走下文水龙头章节，不要反复�
 batch_transfer {
   "walletName": "alice",
   "recipients": [
-    { "to": "<地址1>", "amount": "0.01" },
-    { "to": "<地址2>", "amount": "0.02" },
-    { "to": "<地址3>", "amount": "0.03" }
+    { "to": "<地址1>", "amount": "10000000" },      ← 0.01 SOL
+    { "to": "<地址2>", "amount": "20000000" },      ← 0.02 SOL
+    { "to": "<地址3>", "amount": "30000000" }       ← 0.03 SOL
   ],
   "dryRun": true          ← 接收者多时先模拟
 }
 ```
 
-- 每个接收者金额独立；代币空投加 `mint` + `decimals`（省略 mint 即 SOL）。
+- 每个接收者金额独立，都是 base units；代币空投加 `mint`（`decimals` 可省；省略 mint 即 SOL，金额是 lamports）。
 - 上限 50 个接收者，更多则分多次调用。
 - 默认每 8 条指令打成一笔交易（`chunkSize` 可调 1–10），**串行发送**：某块失败立即停止，后续块标记 skipped——根据返回中各 chunk 的报告修复后，从未完成的接收者继续，不要整批重发。
 
@@ -170,13 +185,13 @@ batch_transfer {
 mixed_transfer {
   "walletName": "alice",
   "legs": [
-    { "kind": "sol",   "to": "<地址A>", "amount": "1" },
-    { "kind": "token", "to": "<地址B>", "amount": "50", "mint": "<MINT地址>", "decimals": 6 }
+    { "kind": "sol",   "to": "<地址A>", "amount": "1000000000" },                               ← 1 SOL
+    { "kind": "token", "to": "<地址B>", "amount": "50000000", "mint": "<MINT地址>", "decimals": 6 }  ← 50 个（6 位小数）
   ]
 }
 ```
 
-- `sol` 腿不带 `mint`/`decimals`；`token` 腿两者都必须带，缺一个报 `INVALID_INPUT`（消息指明是第几条腿）。
+- `sol` 腿金额是 lamports，不带 `mint`/`decimals`；`token` 腿必须带 `mint`（缺了报 `INVALID_INPUT`，消息指明是第几条腿），`decimals` 可省（自动从 mint 读）。
 - 2–10 条腿打成一个交易、一个签名；任何一条腿失败则整笔失败（`dryRun` 先验证是明智的）。
 
 ### 剧本四：发一个 Token-2022 代币并管理
@@ -191,7 +206,7 @@ create_token {
 }                                                                    → 记下 mint
 manage_token2022 { "walletName": "alice", "mint": "<mint>", "action": "mintTokens",
                    "params": { "destinationOwner": "<bob地址>", "amount": "1500000" } }   ← 1.5 个
-transfer         { "walletName": "bob", "to": "<carol地址>", "amount": "1", "mint": "<mint>", "decimals": 6 }
+transfer         { "walletName": "bob", "to": "<carol地址>", "amount": "1000000", "mint": "<mint>" }   ← 1 个；decimals 可省
 manage_token2022 { "walletName": "alice", "mint": "<mint>", "action": "freezeAccount",
                    "params": { "tokenAccountOwner": "<carol地址>" } }
 ```
@@ -209,8 +224,8 @@ manage_token2022 { "walletName": "alice", "mint": "<mint>", "action": "freezeAcc
 ```
 create_multisig  { "walletName": "alice", "members": ["<alice>", "<bob>", "<carol>"], "threshold": 2 }
                                                      → 记下 multisigPda、vaultPda
-transfer         { "walletName": "alice", "to": "<vaultPda>", "amount": "1" }      ← 给金库充值
-propose_multisig { "walletName": "alice", "multisigPda": "<pda>", "to": "<dave>", "amount": "0.5" }
+transfer         { "walletName": "alice", "to": "<vaultPda>", "amount": "1000000000" }   ← 给金库充 1 SOL
+propose_multisig { "walletName": "alice", "multisigPda": "<pda>", "to": "<dave>", "amount": "500000000" }   ← 0.5 SOL
                                                      → 记下 transactionIndex
 approve_multisig { "walletName": "alice", "multisigPda": "<pda>", "transactionIndex": <idx> }
 approve_multisig { "walletName": "bob",   "multisigPda": "<pda>", "transactionIndex": <idx> }  → executeReady: true
@@ -219,7 +234,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
 ```
 
 - 发起人 / 投票人 / 执行人都必须是 `members` 里的成员，且对应钱包已加载。
-- 代币提案加 `mint` + `decimals`，金库要先持有该代币；接收方 ATA 由金库出钱自动创建。
+- 代币提案加 `mint`（`decimals` 可省），`amount` 换成代币 base units；金库要先持有该代币；接收方 ATA 由金库出钱自动创建。
 - 同一成员重复投票是空操作（`alreadyApproved: true`），不算错误。
 - `timeLock` > 0 时 approved 后还要等够秒数才能执行。
 
@@ -240,16 +255,16 @@ get_multisig     { "multisigPda": "<pda>" }                                     
    看：mint、extensions 含 "transferFeeConfig"、mintTo.signature 非空。
 
 2. build_transfer {
-     "walletName": "alice", "to": "<bob>", "amount": "1", "mint": "<mint>", "decimals": 6,
+     "walletName": "alice", "to": "<bob>", "amount": "1000000", "mint": "<mint>", "decimals": 6,
      "computeUnitLimit": 200000, "computeUnitPrice": 1, "ataMode": "always-idempotent"
    }
    看：plan.instructions 恰好 4 条，label 依次为
        setComputeUnitLimit → setComputeUnitPrice → createAssociatedTokenAccountIdempotent → transferChecked；
-       plan.signers == ["<alice>"]；plan.estimatedBytes < 1232；amountBaseUnits == "1000000"。
+       plan.signers == ["<alice>"]；plan.estimatedBytes < 1232；amountBaseUnits == "1000000"、amountDisplay == "1 (6 dp)"。
        这就是"标准形状"——第三方比对指令顺序 / dataHex 时以此为基准。
 
 3. preflight_transfer { 同上参数 }
-   看：ok: true；findings 里有 TRANSFER_FEE(info)：data.expectedFee == "10000"、data.net == "990000"、
+   看：ok: true；findings 里有 TRANSFER_FEE(info)：data.expectedFee == "10000"（expectedFeeDisplay "0.01 (6 dp)"）、data.net == "990000"（netDisplay "0.99 (6 dp)"）、
        data.tier 说明取的是 older 还是 newer 档；还有 DEST_ATA_MISSING(info，bob 还没 ATA)
        和 NON_STANDARD_CONSTRUCTION(info，因为 ataMode 非 auto)。
 
@@ -258,7 +273,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
 
 5. inspect_transaction { "signature": "<第 4 步 signature>" }
    看：movements[0]：instructionType "transferChecked"、program "token-2022"、
-       amount "1000000"、fee { amount: "10000", source: "balance-delta" }、balanceDelta "990000"。
+       amount "1000000"（amountDisplay "1 (6 dp)"）、fee { amount: "10000", source: "balance-delta" }、balanceDelta "990000"（balanceDeltaDisplay "0.99 (6 dp)"）。
        恒等式：amount − fee.amount == balanceDelta。balanceChanges 里 bob 的 ATA delta == "+990000"。
 6. （可选）inspect_token_account { "address": "<bob 的 ATA>" }
    看：extensions 含 TransferFeeAmount，withheldAmount == "10000"——费先扣留在收款账户，
@@ -281,7 +296,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
    核实：inspect_token_account { "address": "<tokenAccount>" } → extensions 含
          { "type": "MemoTransfer", "requireIncomingTransferMemos": true }。
 
-3. transfer { "walletName": "alice", "to": "<bob>", "amount": "1", "mint": "<mint>", "decimals": 6 }
+3. transfer { "walletName": "alice", "to": "<bob>", "amount": "1000000", "mint": "<mint>", "decimals": 6 }
    看：isError: true；ok: false；error.code == "PREFLIGHT_BLOCKED"；
        preflight.findings 含 MEMO_REQUIRED(block)；plan 仍在（可以看将要发什么）。
        没有上链，不要去浏览器查。
@@ -311,7 +326,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
    inspect_mint { "mint": "<mint>" } → extensions 含 { "type": "PermanentDelegate", "delegate": "<alice>" }。
 
 2. preflight_transfer { "walletName": "alice", "sourceOwner": "<carol>", "to": "<bob>",
-                        "amount": "1", "mint": "<mint>", "decimals": 6 }
+                        "amount": "1000000", "mint": "<mint>", "decimals": 6 }
    看：ok: true；findings 含 PERMANENT_DELEGATE_TRANSFER(info)，data.authority == "<alice>"、
        data.sourceOwner == "<carol>"；另有 NON_STANDARD_CONSTRUCTION(info，列出 sourceOwner)。
 
@@ -329,11 +344,11 @@ get_multisig     { "multisigPda": "<pda>" }                                     
 ```
 1. create_token { "walletName": "alice", "preset": "plain-2022", "decimals": 6,
                   "mintTo": { "owner": "<carol>", "amount": "3000000" } }        → mint2
-2. approve_delegate { "walletName": "carol", "mint": "<mint2>", "delegate": "<alice>", "amount": "0.5", "decimals": 6 }
+2. approve_delegate { "walletName": "carol", "mint": "<mint2>", "delegate": "<alice>", "amount": "500000", "decimals": 6 }   ← 0.5 个
    看：tokenAccount（carol 的 ATA）、signature。
-3. preflight_transfer { "walletName": "alice", "sourceOwner": "<carol>", "to": "<bob>", "amount": "1", "mint": "<mint2>", "decimals": 6 }
+3. preflight_transfer { "walletName": "alice", "sourceOwner": "<carol>", "to": "<bob>", "amount": "1000000", "mint": "<mint2>", "decimals": 6 }
    看：ok: false，INSUFFICIENT_DELEGATED_AMOUNT(block)，data.delegatedAmount == "500000"。
-4. transfer { 同上但 "amount": "0.5" }  → 成功；preflight 含 DELEGATE_TRANSFER(info)。
+4. transfer { 同上但 "amount": "500000" }  → 成功；preflight 含 DELEGATE_TRANSFER(info)。
 5. revoke_delegate { "walletName": "carol", "mint": "<mint2>" }  → 之后同样的 transfer 会被 AUTHORITY_NOT_DELEGATE 拦下。
 ```
 
@@ -351,7 +366,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
    失败交易：decodedError == { instructionIndex, programId, customCode, name }，例如 customCode 31 → "MintMismatch"。
    CPI 内层转账：movements[].isInner == true，instructionIndex 是外层指令序号、innerIndex 是内层位置。
    要在线制造这样一笔：cpi_token_transfer { "walletName": "alice", "programId": "<已部署的 solwallet_cpi>",
-   "destination": "<bob>", "mint": "<mint>", "amount": "1", "decimals": 6 } → 再 inspect_transaction 其 signature。
+   "destination": "<bob>", "mint": "<mint>", "amount": "1000000" } → 再 inspect_transaction 其 signature。
 
 2. 地址与账户长度核对（都不用签名）：
    derive_address { "owner": "<钱包>", "mint": "<mint>" }
@@ -379,7 +394,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
 
 | code | 含义 | 正确动作 |
 |---|---|---|
-| `INVALID_INPUT` | 参数错误：钱包不存在、地址非 base58、代币腿缺 `mint`/`decimals`、base-unit 字段传了小数、同名钱包冲突等 | 没有上链，不要去浏览器查；按 `message` 修参数后重调 |
+| `INVALID_INPUT` | 参数错误：钱包不存在、地址非 base58、代币腿缺 `mint`、金额不是 base units 整数串（传了 `"1.5"`、`"0"` 或负数）、同名钱包冲突等 | 没有上链，不要去浏览器查；按 `message` 修参数后重调 |
 | `PREFLIGHT_BLOCKED` | 本地预检发现 block 级问题 | 读 `preflight.findings`，按上面代码表消除；确实要测链上行为才 `force: true` |
 | `MINT_NOT_FOUND` | 预检 / 构造时 mint 在该集群不存在 | 核对 `cluster` 与 mint 地址 |
 | `SIGNER_MISSING` | 交易需要 `authority` 的签名但没提供 | `transfer` 传 `authorityWallet`，或把 authority 改成 `walletName` |
@@ -392,7 +407,7 @@ get_multisig     { "multisigPda": "<pda>" }                                     
 | `ACCOUNT_NOT_FUNDED` | 收款地址从未有过资金 | 先转一小笔 SOL，或保持 ATA 自动创建 |
 | `ACCOUNT_NOT_FOUND` | mint / 账户在链上不存在 | 核对 cluster 与 mint 地址 |
 | `ACCOUNT_OWNER_MISMATCH` | 代币转账把 ATA 地址当钱包地址传了，或 authority 无权 | `to` 传钱包地址，ATA 会自动派生；划转场景看 `AUTHORITY_NOT_DELEGATE` |
-| `AMOUNT_TOO_PRECISE` / `DECIMALS_INVALID` / `AMOUNT_INVALID` | 金额格式问题 | 按 decimals 截断或修正格式后再发 |
+| `DECIMALS_INVALID` / `AMOUNT_INVALID` | decimals 超范围 / 金额格式问题（MCP 输入通常在 schema 层就被拒为 base units 错误） | 改成 base units 整数串后再发 |
 | `BLOCKHASH_EXPIRED` | 区块哈希过期 | 重新调用工具即可（每次调用取新 blockhash） |
 | `TRANSACTION_FAILED` / `TOKEN_<枚举名>` | 链上程序执行失败 | 确定性失败，重发无效；看 `error.custom.name` 与 `dryRun` 日志修参数 |
 | `RATE_LIMITED` | RPC 限流（429） | 等几秒再试；频繁出现建议换付费 RPC |

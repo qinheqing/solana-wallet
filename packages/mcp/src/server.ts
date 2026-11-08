@@ -34,7 +34,7 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
     {
       instructions:
         "Solana wallet testing server. Workflow: create_wallet or import_wallet → get_cluster_status / request_airdrop (devnet/testnet only) → transfer / batch_transfer / mixed_transfer → get_balances. " +
-        "Amounts are human-readable strings (\"1.5\"). Token transfers need mint + decimals. " +
+        "ALL amounts are integer strings in BASE UNITS, like a block explorer: lamports for SOL (1 SOL = \"1000000000\") and token base units for mints (1.5 tokens at 6 decimals = \"1500000\"); human-readable amounts such as \"1.5\" are rejected. Outputs keep the raw value and add *Display hints (amountDisplay, solDisplay, feeDisplay). Token transfers need mint; decimals is optional (read from the mint when omitted). " +
         "mainnet-beta sends require allowMainnet: true (literal). Secrets never appear in output unless export_secret is called with dangerouslyAllowSecretExport: true.",
     },
   );
@@ -103,6 +103,7 @@ const INPUT_ERROR_PATTERNS: RegExp[] = [
   /already exists/i,
   /Invalid public key/i,
   /Non-base58/i,
+  /^Invalid amount/i,
   /decimals/i,
   /BigInt/i,
   /base[- ]unit/i,
@@ -133,4 +134,4 @@ function classifyError(error: unknown): ParsedProgramError {
 }
 
 const INVALID_INPUT_SUGGESTION =
-  "Check the tool arguments: wallet names (list_wallets), base58 addresses, mint + decimals for token legs, and amount formats (human-readable for transfers; integer base-unit strings for create_token/manage_token2022 amounts and fees). Nothing was sent on-chain.";
+  "Check the tool arguments: wallet names (list_wallets), base58 addresses, mint for token legs, and amount formats — every amount is an integer string in base units (lamports: 1 SOL = \"1000000000\"; token base units = tokens × 10^decimals), never a decimal like \"1.5\". Nothing was sent on-chain.";

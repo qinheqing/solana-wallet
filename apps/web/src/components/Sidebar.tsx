@@ -1,43 +1,47 @@
 import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { getWalletBalance, lamportsToSol, PublicKey } from "../lib/coreShim";
+import { getWalletBalance, PublicKey } from "../lib/coreShim";
 import { useApp } from "../lib/AppContext";
+import { useT, type TKey } from "../lib/i18n";
 import { Badge, Button, Input } from "./ui";
+import { AmountValue } from "./Amount";
+import { LocaleToggle } from "./LocaleToggle";
 import type { ClusterName } from "../lib/types";
 
-const CLUSTERS: { value: ClusterName; label: string }[] = [
-  { value: "localnet", label: "localnet (test validator via dev proxy)" },
-  { value: "devnet", label: "devnet" },
-  { value: "testnet", label: "testnet" },
-  { value: "mainnet-beta", label: "mainnet-beta" },
-  { value: "custom", label: "custom RPC URL" },
+const CLUSTERS: { value: ClusterName; label?: TKey }[] = [
+  { value: "localnet", label: "sidebar.cluster.localnet" },
+  { value: "devnet" },
+  { value: "testnet" },
+  { value: "mainnet-beta" },
+  { value: "custom", label: "sidebar.cluster.custom" },
 ];
 
-const NAV = [
-  { to: "/", label: "Dashboard", end: true },
-  { to: "/wallet", label: "Wallets" },
-  { to: "/transfer", label: "Transfer" },
-  { to: "/token", label: "Tokens" },
-  { to: "/multisig", label: "Multisig" },
-  { to: "/inspect", label: "交易查看器" },
+const NAV: { to: string; label: TKey; end?: boolean }[] = [
+  { to: "/", label: "nav.dashboard", end: true },
+  { to: "/wallet", label: "nav.wallets" },
+  { to: "/transfer", label: "nav.transfer" },
+  { to: "/token", label: "nav.tokens" },
+  { to: "/multisig", label: "nav.multisig" },
+  { to: "/inspect", label: "nav.inspect" },
 ];
 
 export function Sidebar() {
+  const t = useT();
   const { state, connection, currentWallet, setCluster, setCustomRpc, setMainnetAck } = useApp();
-  const [solUi, setSolUi] = useState<number | null>(null);
+  const [lamports, setLamports] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (!currentWallet) {
-      setSolUi(null);
+      setLamports(null);
       return;
     }
     getWalletBalance(connection, new PublicKey(currentWallet.address))
       .then((b) => {
-        if (!cancelled) setSolUi(b.solUi);
+        if (!cancelled) setLamports(b.solLamports);
       })
       .catch(() => {
-        if (!cancelled) setSolUi(null);
+        if (!cancelled) setLamports(null);
       });
     return () => {
       cancelled = true;
@@ -46,14 +50,17 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-full shrink-0 flex-col gap-4 border-b border-zinc-800 bg-zinc-950 p-4 md:h-full md:w-72 md:border-b-0 md:border-r">
-      <div>
-        <h1 className="text-sm font-bold tracking-wide text-emerald-400">SOLWALLET CONSOLE</h1>
-        <p className="mt-0.5 text-xs text-zinc-500">Local-only wallet test bench</p>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-sm font-bold tracking-wide text-emerald-400">{t("app.brand")}</h1>
+          <p className="mt-0.5 text-xs text-zinc-500">{t("app.tagline")}</p>
+        </div>
+        <LocaleToggle />
       </div>
 
       <div>
         <label htmlFor="sidebar-cluster" className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-          Cluster
+          {t("sidebar.cluster")}
         </label>
         <select
           id="sidebar-cluster"
@@ -63,19 +70,15 @@ export function Sidebar() {
         >
           {CLUSTERS.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {c.label ? t(c.label) : c.value}
             </option>
           ))}
         </select>
-        {state.cluster === "localnet" && (
-          <p className="mt-2 text-xs text-zinc-500">
-            Proxied to the solana-test-validator running next to the dev server. Airdrops work here.
-          </p>
-        )}
+        {state.cluster === "localnet" && <p className="mt-2 text-xs text-zinc-500">{t("sidebar.localnetHint")}</p>}
         {state.cluster === "custom" && (
           <Input
             className="mt-2"
-            aria-label="Custom RPC URL"
+            aria-label={t("sidebar.customRpc")}
             placeholder="https://your-rpc.example.com"
             value={state.customRpcUrl}
             onChange={(e) => setCustomRpc(e.target.value)}
@@ -89,13 +92,13 @@ export function Sidebar() {
               onChange={(e) => setMainnetAck(e.target.checked)}
               className="mt-0.5"
             />
-            I understand this sends real funds on mainnet-beta.
+            {t("sidebar.mainnetAck")}
           </label>
         )}
       </div>
 
       <div className="rounded-md border border-zinc-800 bg-zinc-900/50 p-3">
-        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-400">Current wallet</div>
+        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-400">{t("sidebar.currentWallet")}</div>
         {currentWallet ? (
           <div className="space-y-1">
             <div className="truncate text-sm text-zinc-100">{currentWallet.name}</div>
@@ -103,21 +106,21 @@ export function Sidebar() {
               {currentWallet.address.slice(0, 4)}…{currentWallet.address.slice(-4)}
             </div>
             <div className="text-sm text-emerald-400">
-              {solUi === null ? "…" : `${solUi.toFixed(4)} SOL`}
+              {lamports === null ? "…" : <AmountValue raw={lamports} decimals={9} symbol="SOL" unit={t("common.lamports")} stacked />}
             </div>
-            {currentWallet.encrypted && <Badge tone="success">encrypted</Badge>}
+            {currentWallet.encrypted && <Badge tone="success">{t("common.encrypted")}</Badge>}
           </div>
         ) : (
-          <div className="text-sm text-zinc-500">No wallet selected</div>
+          <div className="text-sm text-zinc-500">{t("sidebar.noWallet")}</div>
         )}
         <NavLink to="/wallet">
           <Button variant="ghost" className="mt-2 w-full">
-            Switch / manage wallets
+            {t("sidebar.manageWallets")}
           </Button>
         </NavLink>
       </div>
 
-      <nav aria-label="Primary" className="flex gap-1 overflow-x-auto md:flex-1 md:flex-col md:overflow-visible">
+      <nav aria-label={t("nav.primary")} className="flex gap-1 overflow-x-auto md:flex-1 md:flex-col md:overflow-visible">
         {NAV.map((item) => (
           <NavLink
             key={item.to}
@@ -129,18 +132,14 @@ export function Sidebar() {
               }`
             }
           >
-            {item.label}
+            {t(item.label)}
           </NavLink>
         ))}
       </nav>
 
       <div className="hidden truncate text-xs text-zinc-600 md:block" title={connection.rpcUrl}>
-        rpc: {connection.rpcUrl}
+        {t("sidebar.rpc", { url: connection.rpcUrl })}
       </div>
     </aside>
   );
-}
-
-export function lamportsToSolLabel(lamports: bigint | number): string {
-  return `${lamportsToSol(lamports)} SOL`;
 }

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   buildTransferPlan,
-  parseAmount,
   preflightTransfer,
   parseTransactionError,
   transfer,
@@ -11,7 +10,9 @@ import {
   type TransferResult,
 } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT } from "../../lib/i18n";
 import { Button, Card, ErrorBanner, Input, Label } from "../../components/ui";
+import { AmountHint, parseBaseUnits, parseDecimals } from "../../components/Amount";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ResultView } from "./ResultView";
 import { AdvancedOptions, DEFAULT_ADVANCED, toKnobs, type AdvancedState } from "./AdvancedOptions";
@@ -24,6 +25,7 @@ interface Preview {
 }
 
 export function SingleTransfer() {
+  const t = useT();
   const { connection, state, currentWallet } = useApp();
   const keypair = state.unlockedKeypair;
   const isMainnet = state.cluster === "mainnet-beta";
@@ -43,13 +45,15 @@ export function SingleTransfer() {
   const [confirmForce, setConfirmForce] = useState(false);
 
   const isToken = mint.trim().length > 0;
+  const hintDecimals = isToken ? parseDecimals(decimals) : 9;
 
-  /** Parse shared inputs; returns null (and sets formError) when invalid. */
+  /** Parse shared inputs; returns null (and sets formError) when invalid. Amount is raw base units. */
   const parseInputs = () => {
-    const dec = isToken ? Number(decimals) : 9;
     try {
-      const amountBase = parseAmount(amount, dec);
-      const knobs = toKnobs(advanced, isToken);
+      const dec = isToken ? parseDecimals(decimals) : 9;
+      if (dec === null) throw new Error(t("adv.err.nonNegInt", { field: "decimals" }));
+      const amountBase = parseBaseUnits(amount, t);
+      const knobs = toKnobs(advanced, isToken, t);
       const dest = new PublicKey(destination.trim());
       const mintKey = isToken ? new PublicKey(mint.trim()) : undefined;
       return { dec, amountBase, knobs, dest, mintKey };
@@ -64,7 +68,7 @@ export function SingleTransfer() {
     setPreview(null);
     const payerAddr = keypair?.publicKey.toBase58() ?? currentWallet?.address;
     if (!payerAddr) {
-      setFormError("请先选择一个钱包（预览无需解锁）。");
+      setFormError(t("transfer.previewNeedsWallet"));
       return;
     }
     const parsed = parseInputs();
@@ -105,7 +109,7 @@ export function SingleTransfer() {
     setFormError(null);
     setResult(null);
     if (!keypair) {
-      setFormError("Select/unlock a wallet first.");
+      setFormError(t("common.selectUnlockFirst"));
       return;
     }
     const parsed = parseInputs();
@@ -135,31 +139,32 @@ export function SingleTransfer() {
   return (
     <Card className="space-y-3">
       <div>
-        <Label htmlFor="singletransfer-destination-address">Destination address</Label>
-        <Input id="singletransfer-destination-address" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="recipient pubkey" />
+        <Label htmlFor="singletransfer-destination-address">{t("transfer.destination")}</Label>
+        <Input id="singletransfer-destination-address" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder={t("transfer.destinationPlaceholder")} />
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <Label htmlFor="singletransfer-mint">Mint (leave empty for SOL)</Label>
-          <Input id="singletransfer-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder="optional mint address" />
+          <Label htmlFor="singletransfer-mint">{t("transfer.mint")}</Label>
+          <Input id="singletransfer-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder={t("transfer.mintPlaceholder")} />
         </div>
         <div>
-          <Label htmlFor="singletransfer-decimals">Decimals (token only)</Label>
-          <Input id="singletransfer-decimals" value={decimals} onChange={(e) => setDecimals(e.target.value)} disabled={!isToken} />
+          <Label htmlFor="singletransfer-decimals">{t("transfer.decimals")}</Label>
+          <Input id="singletransfer-decimals" inputMode="numeric" value={decimals} onChange={(e) => setDecimals(e.target.value)} disabled={!isToken} />
         </div>
       </div>
       <div>
-        <Label htmlFor="singletransfer-amount">Amount</Label>
-        <Input id="singletransfer-amount" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 1.5" />
+        <Label htmlFor="singletransfer-amount">{t("transfer.amount")}</Label>
+        <Input id="singletransfer-amount" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t("transfer.amountPlaceholder")} />
+        <AmountHint value={amount} decimals={hintDecimals} sol={!isToken} />
       </div>
       <label className="flex items-center gap-2 text-sm text-zinc-300">
         <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
-        Dry run (simulate only, recommended first)
+        {t("transfer.dryRunFirst")}
       </label>
       {isMainnet && (
         <label className="flex items-center gap-2 text-sm text-amber-300">
           <input type="checkbox" checked={mainnetAck} onChange={(e) => setMainnetAck(e.target.checked)} />
-          I confirm sending real funds on mainnet-beta.
+          {t("common.mainnetAckSend")}
         </label>
       )}
 
@@ -168,23 +173,23 @@ export function SingleTransfer() {
       {formError && <div className="text-sm text-red-400">{formError}</div>}
       <div className="flex flex-wrap gap-2">
         <Button variant="default" disabled={previewing || busy} onClick={runPreview}>
-          {previewing ? "构造中…" : "预览"}
+          {previewing ? t("transfer.building") : t("transfer.preview")}
         </Button>
         <Button variant="primary" disabled={busy || !keypair} onClick={() => send(false)}>
-          {busy ? "Sending…" : dryRun ? "Simulate" : "Send"}
+          {busy ? t("common.sending") : dryRun ? t("common.simulate") : t("common.send")}
         </Button>
       </div>
 
       {preview && (
         <div className="space-y-3 rounded-md border border-zinc-800 p-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-zinc-300">预览（未签名、未发送）</h4>
+            <h4 className="text-sm font-semibold text-zinc-300">{t("transfer.previewTitle")}</h4>
             <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={() => setPreview(null)}>
-              关闭
+              {t("common.close")}
             </Button>
           </div>
           {preview.preflight && <PreflightFindings preflight={preview.preflight} />}
-          {preview.buildError && <ErrorBanner>构造失败：{preview.buildError}</ErrorBanner>}
+          {preview.buildError && <ErrorBanner>{t("transfer.buildFailed", { error: preview.buildError })}</ErrorBanner>}
           {preview.plan && <PlanView plan={preview.plan} />}
         </div>
       )}
@@ -193,14 +198,14 @@ export function SingleTransfer() {
 
       {confirmForce && (
         <ConfirmDialog
-          title="强制发送（绕过预检）"
+          title={t("transfer.forceTitle")}
           description={
             <div className="space-y-1">
-              <div>将以 force: true 重新提交，忽略预检 block 级发现。</div>
-              <div className="text-amber-300">交易很可能在链上失败并扣除手续费；仅用于测试错误处理路径。</div>
+              <div>{t("transfer.forceDesc1")}</div>
+              <div className="text-amber-300">{t("transfer.forceDesc2")}</div>
             </div>
           }
-          confirmLabel="强制发送"
+          confirmLabel={t("transfer.forceSend")}
           danger
           onConfirm={() => {
             setConfirmForce(false);

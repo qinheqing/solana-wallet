@@ -2,13 +2,14 @@ import { useState } from "react";
 import {
   inspectTransaction,
   parseTransactionError,
-  formatAmount,
   type Cluster,
   type TransactionInspection,
   type TokenMovement,
 } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT } from "../../lib/i18n";
 import { Badge, Button, Card, ErrorBanner, Input, Label, Textarea } from "../../components/ui";
+import { AmountValue } from "../../components/Amount";
 import { CopyButton, shortKey } from "../../components/CopyButton";
 import { downloadText, stringifyJson } from "../../lib/download";
 
@@ -17,17 +18,6 @@ type Mode = "signature" | "json";
 function fmtTime(blockTime: number | null): string {
   if (blockTime === null) return "—";
   return `${new Date(blockTime * 1000).toLocaleString()} (${blockTime})`;
-}
-
-/** Raw amount + decimals → formatted string via core formatAmount (never uiAmount). */
-function fmtRaw(raw: string | null, decimals: number | null): string {
-  if (raw === null) return "—";
-  if (decimals === null) return raw;
-  try {
-    return `${formatAmount(BigInt(raw), decimals)} (${raw})`;
-  } catch {
-    return raw;
-  }
 }
 
 function KeyCell({ value }: { value: string | null }) {
@@ -41,6 +31,7 @@ function KeyCell({ value }: { value: string | null }) {
 }
 
 function MovementRow({ m }: { m: TokenMovement }) {
+  const t = useT();
   return (
     <tr className="border-t border-zinc-800/60 align-top">
       <td className="py-1 pr-2 text-zinc-500">
@@ -62,7 +53,7 @@ function MovementRow({ m }: { m: TokenMovement }) {
           acct <KeyCell value={m.sourceAccount} />
         </div>
         {m.sourceAccounts && m.sourceAccounts.length > 0 && (
-          <div className="text-zinc-500">+{m.sourceAccounts.length} 个源账户</div>
+          <div className="text-zinc-500">{t("tx.sourceAccounts", { n: m.sourceAccounts.length })}</div>
         )}
       </td>
       <td className="py-1 pr-2">
@@ -79,26 +70,28 @@ function MovementRow({ m }: { m: TokenMovement }) {
       <td className="py-1 pr-2">
         <KeyCell value={m.mint} />
       </td>
-      <td className="py-1 pr-2 font-mono">
-        {fmtRaw(m.amount, m.decimals)}
-        {m.decimals !== null && <div className="text-zinc-500">dec {m.decimals}</div>}
+      <td className="py-1 pr-2">
+        <AmountValue raw={m.amount} decimals={m.decimals} stacked />
       </td>
-      <td className="py-1 pr-2 font-mono">
+      <td className="py-1 pr-2">
         {m.fee ? (
           <>
-            {fmtRaw(m.fee.amount, m.decimals)}
-            <div className="text-zinc-500">{m.fee.source}</div>
+            <AmountValue raw={m.fee.amount} decimals={m.decimals} stacked />
+            <div className="text-xs text-zinc-500">{m.fee.source}</div>
           </>
         ) : (
           "—"
         )}
       </td>
-      <td className="py-1 pr-2 font-mono">{fmtRaw(m.balanceDelta, m.decimals)}</td>
+      <td className="py-1 pr-2">
+        <AmountValue raw={m.balanceDelta} decimals={m.decimals} stacked />
+      </td>
     </tr>
   );
 }
 
 export function InspectPage() {
+  const t = useT();
   const { connection, state } = useApp();
   const [mode, setMode] = useState<Mode>("signature");
   const [signature, setSignature] = useState("");
@@ -114,14 +107,14 @@ export function InspectPage() {
     try {
       if (mode === "signature") {
         const sig = signature.trim();
-        if (!sig) throw new Error("请输入交易 signature");
+        if (!sig) throw new Error(t("tx.needSig"));
         setResult(await inspectTransaction({ conn: connection, signature: sig }));
       } else {
         let parsed: unknown;
         try {
           parsed = JSON.parse(json);
         } catch {
-          throw new Error("JSON 解析失败：请粘贴完整的 getTransaction(jsonParsed) 返回值");
+          throw new Error(t("tx.jsonParseFailed"));
         }
         // JSON-RPC envelopes are common when copying from curl output.
         if (parsed && typeof parsed === "object" && "result" in parsed && !("transaction" in parsed)) {
@@ -148,46 +141,44 @@ export function InspectPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-semibold">交易查看器</h2>
+      <h2 className="text-xl font-semibold">{t("tx.title")}</h2>
       <Card className="space-y-3">
         <div className="flex gap-2">
           <Button variant={mode === "signature" ? "primary" : "default"} onClick={() => setMode("signature")}>
-            按 signature 查询
+            {t("tx.bySignature")}
           </Button>
           <Button variant={mode === "json" ? "primary" : "default"} onClick={() => setMode("json")}>
-            粘贴 JSON（离线）
+            {t("tx.pasteJson")}
           </Button>
         </div>
         {mode === "signature" ? (
           <div>
-            <Label htmlFor="inspect-signature">交易 signature</Label>
-            <Input id="inspect-signature" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="base58 signature" />
-            <p className="mt-1 text-xs text-zinc-500">在当前 cluster（{connection.rpcUrl}）上查询，commitment=confirmed。</p>
+            <Label htmlFor="inspect-signature">{t("tx.signature")}</Label>
+            <Input id="inspect-signature" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder={t("tx.sigPlaceholder")} />
+            <p className="mt-1 text-xs text-zinc-500">{t("tx.sigHint", { rpc: connection.rpcUrl })}</p>
           </div>
         ) : (
           <div>
-            <Label htmlFor="inspect-json">getTransaction(jsonParsed) 返回值</Label>
+            <Label htmlFor="inspect-json">{t("tx.jsonLabel")}</Label>
             <Textarea
               id="inspect-json"
               rows={8}
               className="font-mono text-xs"
               value={json}
               onChange={(e) => setJson(e.target.value)}
-              placeholder='{"slot":…,"transaction":{…},"meta":{…}}  （也可粘贴带 result 的 JSON-RPC 响应）'
+              placeholder={t("tx.jsonPlaceholder")}
             />
-            <p className="mt-1 text-xs text-zinc-500">
-              纯离线解析，不访问网络。需用 encoding=jsonParsed、maxSupportedTransactionVersion=0 获取。
-            </p>
+            <p className="mt-1 text-xs text-zinc-500">{t("tx.jsonHint")}</p>
           </div>
         )}
         {error && <ErrorBanner>{error}</ErrorBanner>}
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" disabled={busy} onClick={run}>
-            {busy ? "解析中…" : "查看"}
+            {busy ? t("tx.parsing") : t("tx.run")}
           </Button>
           {result && (
             <Button variant="default" onClick={exportJson}>
-              导出 JSON
+              {t("tx.export")}
             </Button>
           )}
         </div>
@@ -197,11 +188,11 @@ export function InspectPage() {
         <>
           <Card className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-zinc-300">概览</h3>
-              <Badge tone={failed ? "danger" : "success"}>{failed ? "失败" : "成功"}</Badge>
+              <h3 className="text-sm font-semibold text-zinc-300">{t("tx.overview")}</h3>
+              <Badge tone={failed ? "danger" : "success"}>{failed ? t("tx.failed") : t("tx.success")}</Badge>
               {result.explorerUrl && (
                 <a href={result.explorerUrl} target="_blank" rel="noreferrer" className="text-xs text-emerald-400 hover:underline">
-                  在 Explorer 打开 ↗
+                  {t("tx.openExplorer")}
                 </a>
               )}
             </div>
@@ -216,7 +207,9 @@ export function InspectPage() {
               <dt className="text-zinc-500">blockTime</dt>
               <dd className="font-mono text-xs">{fmtTime(result.blockTime)}</dd>
               <dt className="text-zinc-500">fee</dt>
-              <dd className="font-mono text-xs">{result.fee} lamports</dd>
+              <dd className="text-xs">
+                <AmountValue raw={result.fee} decimals={9} symbol="SOL" unit={t("common.lamports")} />
+              </dd>
               <dt className="text-zinc-500">err</dt>
               <dd className="font-mono text-xs break-all">
                 {failed ? JSON.stringify(result.err) : "null"}
@@ -231,9 +224,9 @@ export function InspectPage() {
           </Card>
 
           <Card className="space-y-2">
-            <h3 className="text-sm font-semibold text-zinc-300">代币流动（movements · {result.movements.length}）</h3>
+            <h3 className="text-sm font-semibold text-zinc-300">{t("tx.movements", { n: result.movements.length })}</h3>
             {result.movements.length === 0 ? (
-              <div className="text-sm text-zinc-500">该交易没有代币程序指令。</div>
+              <div className="text-sm text-zinc-500">{t("tx.noMovements")}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1100px] text-left text-xs text-zinc-300">
@@ -246,9 +239,9 @@ export function InspectPage() {
                       <th className="pr-2 font-medium">to</th>
                       <th className="pr-2 font-medium">authority</th>
                       <th className="pr-2 font-medium">mint</th>
-                      <th className="pr-2 font-medium">amount (raw)</th>
-                      <th className="pr-2 font-medium">fee</th>
-                      <th className="pr-2 font-medium">dest Δ</th>
+                      <th className="pr-2 font-medium">{t("tx.col.amount")}</th>
+                      <th className="pr-2 font-medium">{t("tx.col.fee")}</th>
+                      <th className="pr-2 font-medium">{t("tx.col.destDelta")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -262,9 +255,9 @@ export function InspectPage() {
           </Card>
 
           <Card className="space-y-2">
-            <h3 className="text-sm font-semibold text-zinc-300">余额变化（balanceChanges · {result.balanceChanges.length}）</h3>
+            <h3 className="text-sm font-semibold text-zinc-300">{t("tx.balanceChanges", { n: result.balanceChanges.length })}</h3>
             {result.balanceChanges.length === 0 ? (
-              <div className="text-sm text-zinc-500">无代币余额变化。</div>
+              <div className="text-sm text-zinc-500">{t("tx.noBalanceChanges")}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-xs text-zinc-300">
@@ -274,14 +267,14 @@ export function InspectPage() {
                       <th className="pr-2 font-medium">owner</th>
                       <th className="pr-2 font-medium">mint</th>
                       <th className="pr-2 font-medium">program</th>
-                      <th className="pr-2 font-medium">pre</th>
-                      <th className="pr-2 font-medium">post</th>
-                      <th className="pr-2 font-medium">Δ</th>
+                      <th className="pr-2 font-medium">{t("tx.col.pre")}</th>
+                      <th className="pr-2 font-medium">{t("tx.col.post")}</th>
+                      <th className="pr-2 font-medium">{t("tx.col.delta")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {result.balanceChanges.map((b) => (
-                      <tr key={`${b.account}-${b.mint}`} className="border-t border-zinc-800/60">
+                      <tr key={`${b.account}-${b.mint}`} className="border-t border-zinc-800/60 align-top">
                         <td className="py-1 pr-2">
                           <KeyCell value={b.account} />
                         </td>
@@ -292,10 +285,14 @@ export function InspectPage() {
                           <KeyCell value={b.mint} />
                         </td>
                         <td className="py-1 pr-2 font-mono">{shortKey(b.programId)}</td>
-                        <td className="py-1 pr-2 font-mono">{fmtRaw(b.pre, b.decimals)}</td>
-                        <td className="py-1 pr-2 font-mono">{fmtRaw(b.post, b.decimals)}</td>
-                        <td className={`py-1 pr-2 font-mono ${b.delta.startsWith("-") ? "text-red-300" : "text-emerald-300"}`}>
-                          {fmtRaw(b.delta, b.decimals)}
+                        <td className="py-1 pr-2">
+                          <AmountValue raw={b.pre} decimals={b.decimals} stacked />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <AmountValue raw={b.post} decimals={b.decimals} stacked />
+                        </td>
+                        <td className={`py-1 pr-2 ${b.delta.startsWith("-") ? "text-red-300" : "text-emerald-300"}`}>
+                          <AmountValue raw={b.delta} decimals={b.decimals} stacked />
                         </td>
                       </tr>
                     ))}
@@ -307,7 +304,7 @@ export function InspectPage() {
 
           {result.warnings.length > 0 && (
             <Card>
-              <h3 className="mb-1 text-sm font-semibold text-amber-300">警告（{result.warnings.length}）</h3>
+              <h3 className="mb-1 text-sm font-semibold text-amber-300">{t("tx.warnings", { n: result.warnings.length })}</h3>
               <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-300">
                 {result.warnings.map((w, i) => (
                   <li key={i}>{w}</li>

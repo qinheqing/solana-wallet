@@ -17,6 +17,7 @@ import { Keypair, LAMPORTS_PER_SOL, type PublicKey } from "@solana/web3.js";
 import {
   createConnection,
   explorerUrl,
+  formatAmount,
   parseKeypairJson,
   shortAddress,
   type ClusterConnection,
@@ -64,6 +65,17 @@ export async function ensureFunded(conn: ClusterConnection, who: Keypair, label:
   }
   log(`${label} ${short(who.publicKey)} low (${balance / LAMPORTS_PER_SOL} SOL); requesting airdrop`);
   await conn.requestAirdrop(who.publicKey, AIRDROP_LAMPORTS);
+}
+
+/**
+ * Reading aid for the JSON reports: raw base units stay in the primary
+ * field; this gives the "1.5 (6 dp)" / "0.01 SOL" sibling, exactly like the
+ * MCP `*Display` fields. Null-safe so missing movement fields stay null.
+ */
+export function displayAmount(raw: bigint | string | number | null | undefined, decimals: number, symbol?: string): string | null {
+  if (raw === null || raw === undefined) return null;
+  const formatted = formatAmount(BigInt(raw), decimals);
+  return symbol ? `${formatted} ${symbol}` : `${formatted} (${decimals} dp)`;
 }
 
 /** `{ signature, explorerUrl }` pair for any confirmed signature. */

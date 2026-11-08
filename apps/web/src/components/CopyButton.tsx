@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { copyText } from "../lib/clipboard";
+import { useT } from "../lib/i18n";
 import { Button } from "./ui";
 
-/** Small "复制" button with transient feedback. */
-export function CopyButton({ text, label = "复制", className = "" }: { text: string; label?: string; className?: string }) {
+/** Small "Copy" button with transient feedback. `label` overrides the idle text (e.g. "⧉"). */
+export function CopyButton({ text, label, className = "" }: { text: string; label?: string; className?: string }) {
+  const t = useT();
   const [state, setState] = useState<"idle" | "ok" | "fail">("idle");
   return (
     <Button
@@ -16,7 +18,7 @@ export function CopyButton({ text, label = "复制", className = "" }: { text: s
         setTimeout(() => setState("idle"), 1500);
       }}
     >
-      {state === "ok" ? "已复制" : state === "fail" ? "复制失败" : label}
+      {state === "ok" ? t("common.copied") : state === "fail" ? t("common.copyFailed") : label ?? t("common.copy")}
     </Button>
   );
 }

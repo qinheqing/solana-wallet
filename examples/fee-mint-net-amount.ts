@@ -22,7 +22,7 @@ import {
   type BuildTransferOptions,
 } from "@solwallet/core";
 
-import { assertOk, connect, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
+import { assertOk, connect, displayAmount, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
 
 const DECIMALS = 6;
 const FEE_BPS = 100; // 1 %
@@ -51,7 +51,9 @@ await runExample("fee-mint-net-amount", async (steps) => {
     preset: created.preset,
     extensions: created.extensions,
     ...txRef(conn, created.signature),
-    mintTo: created.mintTo ? { amount: created.mintTo.amount, ...txRef(conn, created.mintTo.signature) } : null,
+    mintTo: created.mintTo
+      ? { amount: created.mintTo.amount, amountDisplay: displayAmount(created.mintTo.amount, DECIMALS), ...txRef(conn, created.mintTo.signature) }
+      : null,
   };
 
   // 2. Build only: compute budget + always-idempotent ATA + transferChecked.
@@ -112,8 +114,11 @@ await runExample("fee-mint-net-amount", async (steps) => {
     instructionType: move!.instructionType,
     program: move!.program,
     amount: amount.toString(),
+    amountDisplay: displayAmount(amount, DECIMALS),
     fee: move!.fee,
+    feeDisplay: displayAmount(fee, DECIMALS),
     balanceDelta: delta.toString(),
+    balanceDeltaDisplay: displayAmount(delta, DECIMALS),
     consistent,
   };
 
@@ -124,7 +129,9 @@ await runExample("fee-mint-net-amount", async (steps) => {
   steps.recipientAccount = {
     address: ata,
     amount: account.amount,
+    amountDisplay: displayAmount(account.amount, DECIMALS),
     withheld: withheld && "withheldAmount" in withheld ? withheld.withheldAmount : null,
+    withheldDisplay: displayAmount(withheld && "withheldAmount" in withheld ? withheld.withheldAmount : null, DECIMALS),
     dataLength: account.dataLength,
   };
 });

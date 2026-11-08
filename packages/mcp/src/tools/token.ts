@@ -22,12 +22,14 @@ import {
   withdrawWithheldFromMint,
   updateTransferHookProgram,
   createFromPreset,
+  TOKEN_PRESETS,
   type Token2022ExtensionOptions,
   type TokenPresetName,
 } from "@solwallet/core";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 
+import { display, solDisplay, tryDecimals } from "../amounts.js";
 import type { ToolDeps } from "../types.js";
 
 /** Convert the MCP (string-typed) extension payload into core options. */
@@ -190,6 +192,7 @@ export function registerTokenTools(
       // --- preset path: preset supplies defaults, explicit fields override.
       if (args.preset) {
         const extOverride = args.extensions ? toCoreExtensions(args.extensions) : undefined;
+        const presetDecimals = args.decimals ?? TOKEN_PRESETS[args.preset].defaults.decimals ?? 9;
         const result = await createFromPreset(conn, from, args.preset, {
           decimals: args.decimals,
           program: args.tokenProgram,
@@ -207,10 +210,14 @@ export function registerTokenTools(
           signature: result.signature,
           slot: result.slot,
           feeLamports: result.feeLamports,
+          feeDisplay: solDisplay(result.feeLamports),
           simulatedOnly: result.simulatedOnly,
           logs: result.logs,
           error: result.error,
-          mintTo: result.mintTo,
+          mintTo: result.mintTo
+            ? { ...result.mintTo, amountDisplay: display(result.mintTo.amount, presetDecimals) }
+            : result.mintTo,
+          decimals: presetDecimals,
         };
       }
 
@@ -228,7 +235,12 @@ export function registerTokenTools(
         const minted = await mintTokens(conn, from, mint, mintTo.owner, mintTo.amount, {
           allowMainnet: args.allowMainnet,
         });
-        return { ...minted, owner: mintTo.owner.toBase58(), amount: mintTo.amount.toString() };
+        return {
+          ...minted,
+          owner: mintTo.owner.toBase58(),
+          amount: mintTo.amount.toString(),
+          amountDisplay: display(mintTo.amount, args.decimals),
+        };
       };
 
       if (args.tokenProgram === "token-2022") {
@@ -241,10 +253,12 @@ export function registerTokenTools(
           signature: result.signature,
           slot: result.slot,
           feeLamports: result.feeLamports,
+          feeDisplay: solDisplay(result.feeLamports),
           simulatedOnly: result.simulatedOnly,
           logs: result.logs,
           error: result.error,
           mintTo: !result.error && !result.simulatedOnly ? await followUpMint(result.mint) : undefined,
+          decimals: args.decimals,
         };
       }
 
@@ -256,10 +270,12 @@ export function registerTokenTools(
         signature: result.signature,
         slot: result.slot,
         feeLamports: result.feeLamports,
+        feeDisplay: solDisplay(result.feeLamports),
         simulatedOnly: result.simulatedOnly,
         logs: result.logs,
         error: result.error,
         mintTo: !result.error && !result.simulatedOnly ? await followUpMint(result.mint) : undefined,
+        decimals: args.decimals,
       };
     }),
   );
@@ -358,14 +374,29 @@ export function registerTokenTools(
       switch (args.action) {
         case "mintTokens": {
           const amount = baseUnits("amount");
+          const decimals = await tryDecimals(conn, mint);
+          const res = await mintTokens(conn, from, mint, str("destinationOwner", "recipient wallet address"), amount, opts);
           return {
             action: args.action,
-            ...(await mintTokens(conn, from, mint, str("destinationOwner", "recipient wallet address"), amount, opts)),
+            ...res,
+            feeDisplay: solDisplay(res.feeLamports),
+            amount: amount.toString(),
+            amountDisplay: display(amount, decimals),
+            decimals: decimals ?? null,
           };
         }
         case "burnTokens": {
           const amount = baseUnits("amount");
-          return { action: args.action, ...(await burnTokens(conn, from, mint, amount, opts)) };
+          const decimals = await tryDecimals(conn, mint);
+          const res = await burnTokens(conn, from, mint, amount, opts);
+          return {
+            action: args.action,
+            ...res,
+            feeDisplay: solDisplay(res.feeLamports),
+            amount: amount.toString(),
+            amountDisplay: display(amount, decimals),
+            decimals: decimals ?? null,
+          };
         }
         case "setTransferFee": {
           const bps = p.transferFeeBasisPoints;

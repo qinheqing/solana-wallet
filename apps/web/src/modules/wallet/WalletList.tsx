@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { serializeKeypairJson } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT } from "../../lib/i18n";
 import { copyText } from "../../lib/clipboard";
 import { Badge, Button, Card, Input, RiskBanner } from "../../components/ui";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { StoredWalletRecord } from "../../lib/types";
 
 export function WalletList() {
+  const t = useT();
   const { state, currentWallet, unlockWallet, removeWallet } = useApp();
   const [deleteTarget, setDeleteTarget] = useState<StoredWalletRecord | null>(null);
   const [exportTarget, setExportTarget] = useState<StoredWalletRecord | null>(null);
@@ -70,8 +72,8 @@ export function WalletList() {
 
   return (
     <Card className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-300">Wallets ({state.wallets.length})</h3>
-      {state.wallets.length === 0 && <div className="text-sm text-zinc-500">No wallets yet.</div>}
+      <h3 className="text-sm font-semibold text-zinc-300">{t("wallet.list.title", { n: state.wallets.length })}</h3>
+      {state.wallets.length === 0 && <div className="text-sm text-zinc-500">{t("wallet.list.empty")}</div>}
       <ul className="space-y-2">
         {state.wallets.map((w) => (
           <li
@@ -83,23 +85,23 @@ export function WalletList() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="truncate text-sm text-zinc-100">{w.name}</span>
-                {w.encrypted ? <Badge tone="success">encrypted</Badge> : <Badge tone="warn">plaintext</Badge>}
-                {currentWallet?.id === w.id && <Badge>active</Badge>}
+                {w.encrypted ? <Badge tone="success">{t("common.encrypted")}</Badge> : <Badge tone="warn">{t("common.plaintext")}</Badge>}
+                {currentWallet?.id === w.id && <Badge>{t("common.active")}</Badge>}
               </div>
               <div className="truncate font-mono text-xs text-zinc-500">{w.address}</div>
             </div>
             <div className="flex flex-wrap gap-1.5">
               <Button variant="ghost" onClick={() => copyAddress(w.address)}>
-                {copyMsg === w.address ? "Copied" : copyMsg === "copy-failed" ? "Copy failed" : "Copy"}
+                {copyMsg === w.address ? t("common.copied") : copyMsg === "copy-failed" ? t("common.copyFailed") : t("common.copy")}
               </Button>
               <Button variant="default" onClick={() => doSwitch(w)}>
-                Select
+                {t("wallet.select")}
               </Button>
               <Button variant="ghost" onClick={() => startExport(w)}>
-                Export
+                {t("wallet.export")}
               </Button>
               <Button variant="danger" onClick={() => setDeleteTarget(w)}>
-                Delete
+                {t("wallet.delete")}
               </Button>
             </div>
           </li>
@@ -108,21 +110,21 @@ export function WalletList() {
 
       {unlockTarget && !exportTarget && (
         <div className="space-y-2 rounded-md border border-zinc-700 bg-zinc-950 p-3">
-          <div className="text-sm text-zinc-300">Unlock &quot;{unlockTarget.name}&quot;</div>
+          <div className="text-sm text-zinc-300">{t("wallet.unlockTitle", { name: unlockTarget.name })}</div>
           <Input
             type="password"
-            aria-label={`Password for ${unlockTarget.name}`}
+            aria-label={t("wallet.passwordFor", { name: unlockTarget.name })}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
+            placeholder={t("wallet.password")}
           />
           {error && <div className="text-sm text-red-400">{error}</div>}
           <div className="flex gap-2">
             <Button variant="primary" onClick={confirmUnlock}>
-              Unlock
+              {t("wallet.unlock")}
             </Button>
             <Button variant="ghost" onClick={() => setUnlockTarget(null)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </div>
@@ -130,31 +132,28 @@ export function WalletList() {
 
       {exportTarget && (
         <div className="space-y-2 rounded-md border border-zinc-700 bg-zinc-950 p-3">
-          <RiskBanner>
-            Exporting reveals the raw secret key for &quot;{exportTarget.name}&quot;. Anyone who sees it can steal
-            these funds.
-          </RiskBanner>
+          <RiskBanner>{t("wallet.exportWarning", { name: exportTarget.name })}</RiskBanner>
           <label className="flex items-center gap-2 text-sm text-zinc-300">
             <input type="checkbox" checked={exportConfirmed} onChange={(e) => setExportConfirmed(e.target.checked)} />
-            I understand the risk and want to reveal the secret key.
+            {t("wallet.exportAck")}
           </label>
           {exportTarget.encrypted && !exportedSecret && (
             <Input
               type="password"
-              aria-label={`Password for ${exportTarget.name}`}
+              aria-label={t("wallet.passwordFor", { name: exportTarget.name })}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
+              placeholder={t("wallet.password")}
             />
           )}
           {error && <div className="text-sm text-red-400">{error}</div>}
           {!exportedSecret && (
             <div className="flex gap-2">
               <Button variant="danger" disabled={!exportConfirmed} onClick={revealSecret}>
-                Reveal secret key
+                {t("wallet.reveal")}
               </Button>
               <Button variant="ghost" onClick={() => setExportTarget(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           )}
@@ -162,7 +161,7 @@ export function WalletList() {
             <div className="space-y-2">
               <textarea
                 readOnly
-                aria-label="Exported secret key"
+                aria-label={t("wallet.exportedSecret")}
                 value={exportedSecret}
                 className="w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-200"
                 rows={3}
@@ -174,7 +173,7 @@ export function WalletList() {
                   setExportedSecret(null);
                 }}
               >
-                Done
+                {t("common.done")}
               </Button>
             </div>
           )}
@@ -183,10 +182,10 @@ export function WalletList() {
 
       {deleteTarget && (
         <ConfirmDialog
-          title={`Delete wallet "${deleteTarget.name}"?`}
-          description="This removes it from local storage permanently. Make sure you have a backup (mnemonic or keyfile) if you want to use it again."
+          title={t("wallet.deleteTitle", { name: deleteTarget.name })}
+          description={t("wallet.deleteDesc")}
           requireText={deleteTarget.name}
-          confirmLabel="Delete"
+          confirmLabel={t("wallet.delete")}
           onConfirm={() => {
             removeWallet(deleteTarget.id);
             setDeleteTarget(null);

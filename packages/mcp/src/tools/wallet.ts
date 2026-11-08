@@ -2,19 +2,17 @@
  * Wallet & cluster status tools (F3/F2 surface).
  */
 import {
-  formatAmount,
-
   getWalletBalance,
   importFromMnemonic,
   newMnemonic,
   parseKeypairJson,
   serializeKeypairJson,
-  solToLamports,
   toSafeWalletView,
   type ClusterConnection,
 } from "@solwallet/core";
 import { PublicKey } from "@solana/web3.js";
 
+import { baseUnitParam, display, parseBaseUnits, solDisplay } from "../amounts.js";
 import type { ToolDeps } from "../types.js";
 
 export function registerWalletTools(
@@ -214,24 +212,29 @@ export function registerWalletTools(
     "request_airdrop",
     {
       description:
-        "Request faucet SOL on devnet/testnet (refused on mainnet-beta and custom endpoints). Waits for confirmation.",
+        "Request faucet SOL on devnet/testnet (refused on mainnet-beta and custom endpoints). `lamports` is the amount in BASE UNITS (1 SOL = 1000000000). Waits for confirmation.",
       inputSchema: {
         walletName: z.string().optional().describe("Loaded wallet to fund. Provide this or address."),
         address: z.string().optional().describe("Raw base58 address to fund. Provide this or walletName."),
-        sol: z.string().describe("Amount in SOL, human-readable, e.g. \"1.5\". Devnet faucet caps at ~5 SOL per request."),
+        lamports: baseUnitParam(z, "Airdrop amount in lamports (devnet faucet caps at ~5 SOL = 5000000000 per request)"),
         cluster: clusterParam(z, deps),
       },
     },
-    run(async (args: { walletName?: string; address?: string; sol: string; cluster?: string }) => {
+    run(async (args: { walletName?: string; address?: string; lamports: string; cluster?: string }) => {
       const conn: ClusterConnection = connections.get(args.cluster);
       const address = args.address
         ? new PublicKey(args.address)
         : store.require(args.walletName ?? "").keypair.publicKey;
-      const signature = await conn.requestAirdrop(address, Number(solToLamports(args.sol)));
+      const lamports = parseBaseUnits(args.lamports, "lamports", { kind: "SOL" });
+      if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("Invalid amount: lamports exceeds the faucet's safe-integer range (base units).");
+      }
+      const signature = await conn.requestAirdrop(address, Number(lamports));
       return {
         signature,
         address: address.toBase58(),
-        sol: formatAmount(solToLamports(args.sol), 9),
+        lamports: lamports.toString(),
+        solDisplay: solDisplay(lamports),
       };
     }),
   );
@@ -240,7 +243,7 @@ export function registerWalletTools(
     "get_balances",
     {
       description:
-        "Full balance snapshot: SOL plus every SPL Token and Token-2022 account (both programs queried).",
+        "Full balance snapshot: SOL plus every SPL Token and Token-2022 account (both programs queried). Amounts are raw base units (`solLamports`, token `amount`) with `solDisplay` / `display` reading hints.",
       inputSchema: {
         walletName: z.string().optional().describe("Loaded wallet. Provide this or address."),
         address: z.string().optional().describe("Raw base58 address. Provide this or walletName."),
@@ -257,8 +260,10 @@ export function registerWalletTools(
         cluster: conn.cluster,
         ...toSafeWalletView(balance),
         solLamports: balance.solLamports,
-        // Raw base units only: uiAmount is display-layer and never leaves core via MCP.
-        tokens: balance.tokens.map(({ uiAmount: _ui, ...t }) => t),
+        solDisplay: solDisplay(balance.solLamports),
+        // Raw base units only: uiAmount (float) never leaves core via MCP;
+        // `display` is the exact-string hint derived from amount + decimals.
+        tokens: balance.tokens.map(({ uiAmount: _ui, ...t }) => ({ ...t, display: display(t.amount, t.decimals) })),
       };
     }),
   );

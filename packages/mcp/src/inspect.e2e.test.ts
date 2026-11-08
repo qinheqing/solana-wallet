@@ -152,6 +152,7 @@ describe("inspect tools (T-A / T-E) e2e", () => {
     expect(r.cluster).toBe("devnet");
     expect(r.program).toBe("token-2022");
     expect(r.supply).toBe("1000000");
+    expect(r.supplyDisplay).toBe("1 (6 dp)");
     expect(r.extensions).toEqual([
       expect.objectContaining({
         type: "TransferFeeConfig",
@@ -175,6 +176,9 @@ describe("inspect tools (T-A / T-E) e2e", () => {
       mint: t.crafted.mint.toBase58(),
       owner: t.crafted.owner.toBase58(),
       amount: "123",
+      decimals: 6,
+      amountDisplay: "0.000123 (6 dp)",
+      delegatedAmountDisplay: "0 (6 dp)",
       state: "initialized",
       extensions: [{ type: "ImmutableOwner" }, { type: "TransferFeeAmount", withheldAmount: "9" }],
       dataLength: 182,
@@ -187,6 +191,11 @@ describe("inspect tools (T-A / T-E) e2e", () => {
     const bySig = t.body(await t.call("inspect_transaction", { signature: sig }));
     expect(bySig.explorerUrl).toBe(`https://explorer.solana.com/tx/${sig}?cluster=devnet`);
     expect(bySig.movements[0]).toMatchObject({ instructionType: "withdrawWithheldTokensFromAccounts", balanceDelta: "242085167" });
+    expect(bySig.feeDisplay).toMatch(/ SOL$/);
+    expect(bySig.movements[0]).toHaveProperty("amountDisplay");
+    expect(bySig.movements[0]).toHaveProperty("balanceDeltaDisplay");
+    expect(typeof bySig.balanceChanges[0].deltaDisplay).toBe("string");
+    expect(bySig.balanceChanges[0].deltaDisplay).toMatch(/\(\d+ dp\)$/);
     expect(t.fake.getParsedTransaction).toHaveBeenCalledWith(sig, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
 
     const byJson = t.body(await t.call("inspect_transaction", { json: JSON.stringify(t.withdrawJson), cluster: "mainnet-beta" }));

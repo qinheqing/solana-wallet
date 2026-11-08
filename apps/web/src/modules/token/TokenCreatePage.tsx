@@ -4,13 +4,14 @@ import {
   createSplToken,
   createToken2022,
   mintTokens,
-  parseAmount,
   parseTransactionError,
   type CreateTokenResult,
   type TokenPresetName,
 } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT } from "../../lib/i18n";
 import { Button, Card, Input, Label } from "../../components/ui";
+import { AmountHint, isBaseUnits, parseDecimals } from "../../components/Amount";
 import { ResultView, type SimpleTxOutcome } from "../transfer/ResultView";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
@@ -50,6 +51,7 @@ function presetToForm(
 }
 
 export function TokenCreatePage() {
+  const t = useT();
   const { connection, state } = useApp();
   const keypair = state.unlockedKeypair;
   const isMainnet = state.cluster === "mainnet-beta";
@@ -58,6 +60,7 @@ export function TokenCreatePage() {
   const [preset, setPreset] = useState<TokenPresetName | "">("");
   const [presetNotes, setPresetNotes] = useState<string[]>([]);
   const [decimals, setDecimals] = useState("9");
+  /** Raw base units; "0" or empty = no initial mint. */
   const [initialSupply, setInitialSupply] = useState("0");
   const [extForm, setExtForm] = useState<ExtensionFormState>(makeDefaultExtensionFormState());
   const [mainnetAck, setMainnetAck] = useState(false);
@@ -67,7 +70,7 @@ export function TokenCreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  const { extensions, summary } = kind === "token2022" ? buildToken2022Extensions(extForm) : { extensions: undefined, summary: [] };
+  const { extensions, summary } = kind === "token2022" ? buildToken2022Extensions(extForm, t) : { extensions: undefined, summary: [] };
 
   const applyPreset = (name: TokenPresetName | "") => {
     setPreset(name);
@@ -87,12 +90,22 @@ export function TokenCreatePage() {
     setCreated(null);
     setOutcome(null);
     if (!keypair) {
-      setError("Select/unlock a wallet first.");
+      setError(t("common.selectUnlockFirst"));
+      return;
+    }
+    const dec = parseDecimals(decimals);
+    if (dec === null) {
+      setError(t("adv.err.nonNegInt", { field: "decimals" }));
+      return;
+    }
+    const supplyRaw = initialSupply.trim();
+    const wantsSupply = supplyRaw.length > 0 && supplyRaw !== "0";
+    if (wantsSupply && !isBaseUnits(supplyRaw)) {
+      setError(t("amount.invalid"));
       return;
     }
     setBusy(true);
     try {
-      const dec = Number(decimals);
       const opts = {
         decimals: dec,
         allowMainnet: isMainnet ? mainnetAck : undefined,
@@ -110,9 +123,8 @@ export function TokenCreatePage() {
       }
 
       let minted: string | undefined;
-      const supply = parseAmount(initialSupply || "0", dec);
-      if (supply > 0n) {
-        const mintRes = await mintTokens(connection, keypair, result.mint, keypair.publicKey, supply, {
+      if (wantsSupply) {
+        const mintRes = await mintTokens(connection, keypair, result.mint, keypair.publicKey, BigInt(supplyRaw), {
           allowMainnet: isMainnet ? mainnetAck : undefined,
         });
         if (mintRes.error) {
@@ -147,16 +159,16 @@ export function TokenCreatePage() {
 
   return (
     <Card className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-300">Create a new mint</h3>
+      <h3 className="text-sm font-semibold text-zinc-300">{t("token.create.title")}</h3>
       <div>
-        <Label htmlFor="tokencreatepage-preset">快速模板 (quick preset — fills the form, every field stays editable)</Label>
+        <Label htmlFor="tokencreatepage-preset">{t("token.create.preset")}</Label>
         <select
           id="tokencreatepage-preset"
           className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100"
           value={preset}
           onChange={(e) => applyPreset(e.target.value as TokenPresetName | "")}
         >
-          <option value="">— custom —</option>
+          <option value="">{t("token.create.custom")}</option>
           {(Object.keys(TOKEN_PRESETS) as TokenPresetName[]).map((name) => (
             <option key={name} value={name}>
               {name} — {TOKEN_PRESETS[name].description}
@@ -173,20 +185,21 @@ export function TokenCreatePage() {
       </div>
       <div className="flex gap-2">
         <Button variant={kind === "spl" ? "primary" : "default"} onClick={() => setKind("spl")}>
-          Classic SPL Token
+          {t("token.create.spl")}
         </Button>
         <Button variant={kind === "token2022" ? "primary" : "default"} onClick={() => setKind("token2022")}>
-          Token-2022
+          {t("token.create.t22")}
         </Button>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <Label htmlFor="tokencreatepage-decimals">Decimals</Label>
-          <Input id="tokencreatepage-decimals" value={decimals} onChange={(e) => setDecimals(e.target.value)} />
+          <Label htmlFor="tokencreatepage-decimals">{t("token.create.decimals")}</Label>
+          <Input id="tokencreatepage-decimals" inputMode="numeric" value={decimals} onChange={(e) => setDecimals(e.target.value)} />
         </div>
         <div>
-          <Label htmlFor="tokencreatepage-initial-supply">Initial supply (minted to yourself)</Label>
-          <Input id="tokencreatepage-initial-supply" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} />
+          <Label htmlFor="tokencreatepage-initial-supply">{t("token.create.initialSupply")}</Label>
+          <Input id="tokencreatepage-initial-supply" inputMode="numeric" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} />
+          {initialSupply.trim() !== "0" && <AmountHint value={initialSupply} decimals={parseDecimals(decimals)} />}
         </div>
       </div>
 
@@ -195,20 +208,20 @@ export function TokenCreatePage() {
       {isMainnet && (
         <label className="flex items-center gap-2 text-sm text-amber-300">
           <input type="checkbox" checked={mainnetAck} onChange={(e) => setMainnetAck(e.target.checked)} />
-          I confirm creating this mint on mainnet-beta (real SOL rent).
+          {t("token.create.mainnetAck")}
         </label>
       )}
       {error && <div className="text-sm text-red-400">{error}</div>}
       <Button variant="primary" disabled={busy || !keypair} onClick={create}>
-        {busy ? "Creating…" : "Create mint"}
+        {busy ? t("token.create.creating") : t("token.create.create")}
       </Button>
 
       {confirming && (
         <ConfirmDialog
-          title="Confirm Token-2022 extensions"
+          title={t("token.create.confirmTitle")}
           description={
             <div className="space-y-2">
-              <div>The following extensions will be baked into this mint (irreversible once created):</div>
+              <div>{t("token.create.confirmDesc")}</div>
               <ul className="list-disc space-y-1 pl-5 text-xs text-zinc-300">
                 {summary.map((s) => (
                   <li key={s}>{s}</li>
@@ -216,7 +229,7 @@ export function TokenCreatePage() {
               </ul>
             </div>
           }
-          confirmLabel="Create mint"
+          confirmLabel={t("token.create.create")}
           danger={false}
           onConfirm={() => {
             setConfirming(false);
@@ -232,11 +245,19 @@ export function TokenCreatePage() {
           {/* `created` is only set once the mint exists on-chain (creation succeeded);
               it may coexist with an error from the follow-up initial-supply mint. */}
           {created && (
-            <div className="font-mono text-xs text-zinc-400">
-              {outcome.error && <div className="text-amber-300">Mint was created but minting the initial supply failed.</div>}
-              mint: {created.mint}
-              {created.extensions.length > 0 && <div>extensions: {created.extensions.join(", ")}</div>}
-              {created.minted && <div>minted tx: {created.minted}</div>}
+            <div className="break-all font-mono text-xs text-zinc-400">
+              {outcome.error && <div className="text-amber-300">{t("token.create.mintFailed")}</div>}
+              {t("token.create.mint")} {created.mint}
+              {created.extensions.length > 0 && (
+                <div>
+                  {t("token.create.extensions")} {created.extensions.join(", ")}
+                </div>
+              )}
+              {created.minted && (
+                <div>
+                  {t("token.create.mintedTx")} {created.minted}
+                </div>
+              )}
             </div>
           )}
         </div>

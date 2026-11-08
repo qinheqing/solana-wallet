@@ -96,7 +96,7 @@ async function main() {
   const r1 = (await call("create_wallet", { name: "r1" })).data;
   const r2 = (await call("create_wallet", { name: "r2" })).data;
 
-  const airdrop = await call("request_airdrop", { walletName: "alice", sol: "5" }, 60_000);
+  const airdrop = await call("request_airdrop", { walletName: "alice", lamports: "5000000000" }, 60_000);
   check("request_airdrop: alice funded on localnet (real faucet)", !airdrop.isError, airdrop.raw);
 
   const aliceBalance0 = (await call("get_balances", { walletName: "alice" })).data;
@@ -127,8 +127,8 @@ async function main() {
     {
       walletName: "alice",
       recipients: [
-        { to: r1.address, amount: "0.01" },
-        { to: r2.address, amount: "0.01" },
+        { to: r1.address, amount: "10000000" }, // 0.01 SOL in lamports
+        { to: r2.address, amount: "10000000" },
       ],
     },
     60_000,
@@ -136,15 +136,15 @@ async function main() {
   check("batch_transfer: all chunks sent successfully", !batch.isError && /sent successfully/.test(batch.data.summary ?? ""), batch.raw.slice(0, 300));
 
   const r1Balance = (await call("get_balances", { walletName: "r1" })).data;
-  check("get_balances: r1 received 0.01 SOL via batch", Math.abs(r1Balance.solUi - 0.01) < 1e-6, `got ${r1Balance.solUi}`);
+  check("get_balances: r1 received 0.01 SOL via batch (solLamports + solDisplay)", r1Balance.solLamports === 10_000_000 && r1Balance.solDisplay === "0.01 SOL", `got ${r1Balance.solLamports} / ${r1Balance.solDisplay}`);
 
   console.log("\n━━━ Criterion 3: 2-of-3 multisig SOL transfer (create → propose → approve×2 → execute) ━━━");
 
   const m1 = (await call("create_wallet", { name: "m1" })).data;
   const m2 = (await call("create_wallet", { name: "m2" })).data;
   const m3 = (await call("create_wallet", { name: "m3" })).data;
-  await call("request_airdrop", { walletName: "m1", sol: "2" }, 60_000);
-  await call("request_airdrop", { walletName: "m2", sol: "2" }, 60_000);
+  await call("request_airdrop", { walletName: "m1", lamports: "2000000000" }, 60_000);
+  await call("request_airdrop", { walletName: "m2", lamports: "2000000000" }, 60_000);
 
   const ms = await call("create_multisig", {
     walletName: "m1",
@@ -153,7 +153,7 @@ async function main() {
   });
   check("create_multisig: 2-of-3 created", !ms.isError && Boolean(ms.data.multisigPda), ms.raw.slice(0, 300));
 
-  const fundVault = await call("request_airdrop", { address: ms.data.vaultPda, sol: "1" }, 60_000);
+  const fundVault = await call("request_airdrop", { address: ms.data.vaultPda, lamports: "1000000000" }, 60_000);
   check("request_airdrop: multisig vault funded", !fundVault.isError, fundVault.raw.slice(0, 200));
 
   const beneficiary = (await call("create_wallet", { name: "beneficiary" })).data;
@@ -161,7 +161,7 @@ async function main() {
     walletName: "m1",
     multisigPda: ms.data.multisigPda,
     to: beneficiary.address,
-    amount: "0.1",
+    amount: "100000000", // 0.1 SOL in lamports
   });
   check("propose_multisig: proposal created (active)", !proposal.isError && proposal.data.transactionIndex !== undefined, proposal.raw.slice(0, 300));
 

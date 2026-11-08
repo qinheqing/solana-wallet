@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Keypair } from "@solana/web3.js";
 import { generateWallet, newMnemonic, importFromMnemonic } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT, type TKey } from "../../lib/i18n";
 import { copyText } from "../../lib/clipboard";
 import { Button, Card, Input, Label, RiskBanner } from "../../components/ui";
 
@@ -14,6 +15,7 @@ type Source = "mnemonic" | "random";
  * button explains what is still missing instead of silently staying disabled.
  */
 export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
+  const t = useT();
   const { addWallet } = useApp();
 
   // --- identity
@@ -52,11 +54,11 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const blocker = useMemo(() => {
-    if (name.trim().length === 0) return "Enter a wallet name.";
-    if (usePassword && password.length < 8) return "Password must be at least 8 characters.";
-    if (source === "mnemonic" && !backedUp) return "Confirm you have backed up the mnemonic.";
-    if (!keypair) return "Deriving key…";
+  const blockerKey = useMemo<TKey | null>(() => {
+    if (name.trim().length === 0) return "wallet.gen.block.name";
+    if (usePassword && password.length < 8) return "wallet.gen.block.password";
+    if (source === "mnemonic" && !backedUp) return "wallet.gen.block.backup";
+    if (!keypair) return "wallet.gen.block.deriving";
     return null;
   }, [name, usePassword, password, source, backedUp, keypair]);
 
@@ -83,7 +85,7 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
   };
 
   const save = async () => {
-    if (!keypair || blocker) return;
+    if (!keypair || blockerKey) return;
     setBusy(true);
     setError(null);
     try {
@@ -98,27 +100,27 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
 
   return (
     <Card className="space-y-5">
-      <h3 className="text-sm font-semibold text-zinc-300">Generate a new wallet</h3>
+      <h3 className="text-sm font-semibold text-zinc-300">{t("wallet.gen.title")}</h3>
 
       {/* 1. Identity */}
       <section className="space-y-3">
         <div>
-          <Label htmlFor="generatewalletflow-wallet-name">Wallet name</Label>
+          <Label htmlFor="generatewalletflow-wallet-name">{t("wallet.gen.name")}</Label>
           <Input
             id="generatewalletflow-wallet-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. devnet-test-1"
+            placeholder={t("wallet.gen.namePlaceholder")}
             autoFocus
           />
         </div>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={usePassword} onChange={(e) => setUsePassword(e.target.checked)} />
-          Encrypt with a password (recommended)
+          {t("wallet.gen.encrypt")}
         </label>
         {usePassword ? (
           <div>
-            <Label htmlFor="generatewalletflow-password">Password (min 8 chars)</Label>
+            <Label htmlFor="generatewalletflow-password">{t("wallet.gen.password")}</Label>
             <Input
               id="generatewalletflow-password"
               type="password"
@@ -128,34 +130,28 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
             />
           </div>
         ) : (
-          <RiskBanner>
-            Without a password, the secret key is stored in plaintext in this browser&apos;s localStorage. Only use
-            this for throwaway devnet wallets.
-          </RiskBanner>
+          <RiskBanner>{t("wallet.gen.plaintextWarn")}</RiskBanner>
         )}
       </section>
 
       {/* 2. Key source */}
       <section className="space-y-3 border-t border-zinc-800 pt-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">Key source</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">{t("wallet.gen.keySource")}</span>
           <Button variant={source === "mnemonic" ? "primary" : "default"} onClick={() => chooseSource("mnemonic")}>
-            12-word mnemonic (recommended)
+            {t("wallet.gen.mnemonic")}
           </Button>
           <Button variant={source === "random" ? "primary" : "default"} onClick={() => chooseSource("random")}>
-            Random keypair
+            {t("wallet.gen.random")}
           </Button>
           <Button variant="default" onClick={regenerate}>
-            Regenerate
+            {t("wallet.gen.regenerate")}
           </Button>
         </div>
 
         {source === "mnemonic" ? (
           <div className="space-y-2">
-            <RiskBanner>
-              This phrase is shown only here and is NOT stored — only the derived key is saved. Anyone with it can
-              steal these funds. Write it down offline before continuing.
-            </RiskBanner>
+            <RiskBanner>{t("wallet.gen.mnemonicWarn")}</RiskBanner>
             <div className="grid grid-cols-2 gap-2 rounded-md border border-zinc-700 bg-zinc-950 p-3 font-mono text-sm sm:grid-cols-3">
               {mnemonic.split(" ").map((w, i) => (
                 <div key={i} className="text-zinc-200">
@@ -166,33 +162,29 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
             </div>
             <input
               readOnly
-              aria-label="Mnemonic phrase (single line)"
+              aria-label={t("wallet.gen.mnemonicSingleLine")}
               value={mnemonic}
               onFocus={(e) => e.currentTarget.select()}
               className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-300"
             />
             <div className="flex flex-wrap items-center gap-3">
               <Button variant="default" onClick={copyMnemonic}>
-                {copied ? "Copied" : "Copy phrase"}
+                {copied ? t("common.copied") : t("wallet.gen.copyPhrase")}
               </Button>
-              {copyFailed && (
-                <span className="text-sm text-amber-400">Clipboard unavailable — select the phrase below.</span>
-              )}
+              {copyFailed && <span className="text-sm text-amber-400">{t("wallet.gen.clipboardUnavailable")}</span>}
               <label className="flex items-center gap-2 text-sm text-zinc-300">
                 <input type="checkbox" checked={backedUp} onChange={(e) => setBackedUp(e.target.checked)} />
-                I have backed up this mnemonic offline.
+                {t("wallet.gen.backedUp")}
               </label>
             </div>
           </div>
         ) : (
-          <p className="text-sm text-zinc-400">
-            A fresh Ed25519 keypair with no recovery phrase. Export the secret key after saving if you need a backup.
-          </p>
+          <p className="text-sm text-zinc-400">{t("wallet.gen.randomHint")}</p>
         )}
 
         <div className="text-sm">
-          <span className="text-zinc-500">Address: </span>
-          <span className="font-mono text-zinc-200">{address ?? "deriving…"}</span>
+          <span className="text-zinc-500">{t("wallet.gen.address")} </span>
+          <span className="break-all font-mono text-zinc-200">{address ?? t("wallet.gen.deriving")}</span>
         </div>
       </section>
 
@@ -200,10 +192,10 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
       <section className="space-y-2 border-t border-zinc-800 pt-4">
         {error && <div className="text-sm text-red-400">{error}</div>}
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="primary" disabled={!!blocker || busy} onClick={save}>
-            {busy ? "Saving…" : "Create wallet"}
+          <Button variant="primary" disabled={!!blockerKey || busy} onClick={save}>
+            {busy ? t("wallet.gen.saving") : t("wallet.gen.create")}
           </Button>
-          {blocker && !busy && <span className="text-sm text-zinc-500">{blocker}</span>}
+          {blockerKey && !busy && <span className="text-sm text-zinc-500">{t(blockerKey)}</span>}
         </div>
       </section>
     </Card>

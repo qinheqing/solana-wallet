@@ -20,7 +20,7 @@ import {
   transfer,
 } from "@solwallet/core";
 
-import { assertOk, connect, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
+import { assertOk, connect, displayAmount, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
 
 const DECIMALS = 6;
 const MINT_AMOUNT = 5_000_000n;
@@ -96,8 +96,10 @@ await runExample("memo-block-and-force", async (steps) => {
   steps.inspect = {
     explorerUrl: inspected.explorerUrl,
     amount: move?.amount,
+    amountDisplay: displayAmount(move?.amount, DECIMALS),
     fee: move?.fee,
     balanceDelta: move?.balanceDelta,
+    balanceDeltaDisplay: displayAmount(move?.balanceDelta, DECIMALS),
     destAccount: move?.destAccount,
     destMatchesDerivedAta: move?.destAccount === recipientAta,
   };

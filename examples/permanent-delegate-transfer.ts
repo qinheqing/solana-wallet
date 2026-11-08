@@ -23,7 +23,7 @@ import {
   transfer,
 } from "@solwallet/core";
 
-import { assertOk, connect, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
+import { assertOk, connect, displayAmount, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
 
 const DECIMALS = 6;
 const MINT_AMOUNT = 3_000_000n; // 3 tokens to the victim
@@ -91,7 +91,10 @@ await runExample("permanent-delegate-transfer", async (steps) => {
     authority: move!.authority,
     sourceOwner: move!.sourceOwner,
     destOwner: move!.destOwner,
+    amount: TAKE_AMOUNT.toString(),
+    amountDisplay: displayAmount(TAKE_AMOUNT, DECIMALS),
     balanceDelta: move!.balanceDelta,
+    balanceDeltaDisplay: displayAmount(move!.balanceDelta, DECIMALS),
   };
 
   // ---- Part 2: ordinary delegate (needs the owner's approval) --------------
@@ -106,7 +109,7 @@ await runExample("permanent-delegate-transfer", async (steps) => {
     "approveDelegate",
     await approveDelegate(conn, { owner: victim, mint: plain.mint, delegate: payer.publicKey, amount: ALLOWANCE, decimals: DECIMALS }),
   );
-  steps.delegateApprove = { mint: plain.mint, tokenAccount: approved.tokenAccount, allowance: ALLOWANCE.toString(), ...txRef(conn, approved.signature) };
+  steps.delegateApprove = { mint: plain.mint, tokenAccount: approved.tokenAccount, allowance: ALLOWANCE.toString(), allowanceDisplay: displayAmount(ALLOWANCE, DECIMALS), ...txRef(conn, approved.signature) };
 
   const tooMuch = await preflightTransfer(conn, { ...forcedOpts, mint: new PublicKey(plain.mint), amount: TAKE_AMOUNT });
   expect(!tooMuch.ok && tooMuch.findings.some((f) => f.code === "INSUFFICIENT_DELEGATED_AMOUNT"), "1 token > 0.5 allowance is blocked");

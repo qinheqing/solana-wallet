@@ -1,15 +1,18 @@
 /**
  * Observation tools (T-A / T-E): address derivation, mint / token-account
  * inspection and transaction decoding. All read-only; amounts are raw base
- * units as strings — never uiAmount.
+ * units as strings — never uiAmount — with `*Display` hints where the
+ * decimals are known.
  */
 import {
   deriveTokenAddresses,
   inspectMint,
   inspectTokenAccount,
   inspectTransaction,
+  type TransactionInspection,
 } from "@solwallet/core";
 
+import { display, solDisplay } from "../amounts.js";
 import type { ToolDeps } from "../types.js";
 
 export function registerInspectTools(
@@ -42,7 +45,7 @@ export function registerInspectTools(
     "inspect_mint",
     {
       description:
-        "Read a mint: program (spl-token | token-2022), decimals, supply (raw), authorities and every Token-2022 extension decoded (TransferFeeConfig older/newer bps + maxFee + withheld, PermanentDelegate, TransferHook, ScaledUiAmount, MetadataPointer, TokenMetadata, InterestBearingConfig, DefaultAccountState, NonTransferable, ConfidentialTransferMint…), plus accountLen = expected ATA byte length.",
+        "Read a mint: program (spl-token | token-2022), decimals, supply (raw + supplyDisplay), authorities and every Token-2022 extension decoded (TransferFeeConfig older/newer bps + maxFee + withheld, PermanentDelegate, TransferHook, ScaledUiAmount, MetadataPointer, TokenMetadata, InterestBearingConfig, DefaultAccountState, NonTransferable, ConfidentialTransferMint…), plus accountLen = expected ATA byte length.",
       inputSchema: {
         mint: z.string().describe("Mint address (base58)."),
         cluster: clusterParam(z, deps),
@@ -50,7 +53,8 @@ export function registerInspectTools(
     },
     run(async (args: { mint: string; cluster?: string }) => {
       const conn = connections.get(args.cluster);
-      return { cluster: conn.cluster, ...(await inspectMint(conn, args.mint)) };
+      const mint = await inspectMint(conn, args.mint);
+      return { cluster: conn.cluster, ...mint, supplyDisplay: display(mint.supply, mint.decimals) };
     }),
   );
 
@@ -58,7 +62,7 @@ export function registerInspectTools(
     "inspect_token_account",
     {
       description:
-        "Read a token account (ATA): owner, mint, amount (raw), delegate, state, closeAuthority and account-level Token-2022 extensions (MemoTransfer, ImmutableOwner, CpiGuard, TransferFeeAmount withheld, NonTransferableAccount, TransferHookAccount), plus dataLength.",
+        "Read a token account (ATA): owner, mint, decimals, amount (raw + amountDisplay), delegate, state, closeAuthority and account-level Token-2022 extensions (MemoTransfer, ImmutableOwner, CpiGuard, TransferFeeAmount withheld, NonTransferableAccount, TransferHookAccount), plus dataLength.",
       inputSchema: {
         address: z.string().describe("Token account address (base58) — not the wallet; use derive_address first."),
         cluster: clusterParam(z, deps),
@@ -66,7 +70,20 @@ export function registerInspectTools(
     },
     run(async (args: { address: string; cluster?: string }) => {
       const conn = connections.get(args.cluster);
-      return { cluster: conn.cluster, ...(await inspectTokenAccount(conn, args.address)) };
+      const account = await inspectTokenAccount(conn, args.address);
+      let decimals: number | null = null;
+      try {
+        decimals = (await inspectMint(conn, account.mint)).decimals;
+      } catch {
+        decimals = null; // display hints are best-effort; the raw amount is authoritative
+      }
+      return {
+        cluster: conn.cluster,
+        ...account,
+        decimals,
+        amountDisplay: display(account.amount, decimals),
+        delegatedAmountDisplay: display(account.delegatedAmount, decimals),
+      };
     }),
   );
 
@@ -74,7 +91,7 @@ export function registerInspectTools(
     "inspect_transaction",
     {
       description:
-        "Decode a transaction into token movements (program, instructionType, isInner, source/dest + owners, authority, mint, declared amount, fee {amount, source: instruction | balance-delta}, balanceDelta), per-account balanceChanges, decoded InstructionError (Token / Token-2022 enum name) and warnings. Pass a signature (fetched with jsonParsed, maxSupportedTransactionVersion 0) or a getTransaction JSON string (fully offline).",
+        "Decode a transaction into token movements (program, instructionType, isInner, source/dest + owners, authority, mint, declared amount (+ amountDisplay), fee {amount, source: instruction | balance-delta}, balanceDelta (+ balanceDeltaDisplay)), per-account balanceChanges, decoded InstructionError (Token / Token-2022 enum name) and warnings. Pass a signature (fetched with jsonParsed, maxSupportedTransactionVersion 0) or a getTransaction JSON string (fully offline).",
       inputSchema: {
         signature: z.string().optional().describe("Transaction signature to fetch. Provide this or json."),
         json: z
@@ -96,11 +113,26 @@ export function registerInspectTools(
         } catch {
           throw new Error("Invalid input: json is not valid JSON text.");
         }
-        return { cluster: conn.cluster, ...(await inspectTransaction({ json: parsed, cluster: conn.cluster, rpcUrl: conn.rpcUrl })) };
+        return { cluster: conn.cluster, ...withDisplays(await inspectTransaction({ json: parsed, cluster: conn.cluster, rpcUrl: conn.rpcUrl })) };
       }
-      return { cluster: conn.cluster, ...(await inspectTransaction({ conn, signature: args.signature! })) };
+      return { cluster: conn.cluster, ...withDisplays(await inspectTransaction({ conn, signature: args.signature! })) };
     }),
   );
+}
+
+/** Add display hints next to the raw movement / balance-change figures (decimals known from the parsed tx). */
+function withDisplays(tx: TransactionInspection) {
+  return {
+    ...tx,
+    feeDisplay: solDisplay(tx.fee),
+    movements: tx.movements.map((m) => ({
+      ...m,
+      amountDisplay: display(m.amount, m.decimals),
+      feeDisplay: display(m.fee?.amount ?? null, m.decimals),
+      balanceDeltaDisplay: display(m.balanceDelta, m.decimals),
+    })),
+    balanceChanges: tx.balanceChanges.map((c) => ({ ...c, deltaDisplay: display(c.delta, c.decimals) })),
+  };
 }
 
 function clusterParam(z: typeof import("zod").z, deps: ToolDeps) {

@@ -12,11 +12,10 @@ import {
   executeMultisigProposal,
   getMultisigState,
   listProposals,
-  parseAmount,
-  solToLamports,
 } from "@solwallet/core";
 import { PublicKey } from "@solana/web3.js";
 
+import { baseUnitParam, DECIMALS_OPTIONAL_DESC, display, parseBaseUnits, resolveDecimals, SOL_DECIMALS, solDisplay } from "../amounts.js";
 import type { ToolDeps } from "../types.js";
 
 type McpServer = import("@modelcontextprotocol/sdk/server/mcp.js").McpServer;
@@ -93,14 +92,14 @@ export function registerMultisigTools(
     "propose_multisig",
     {
       description:
-        "Create a proposal on a Squads multisig: wraps a transfer from the multisig vault into a vault transaction and opens it for votes (status active). Native SOL (to + amount in SOL) or SPL/Token-2022 (add mint + decimals; destination token account is auto-created from vault funds). Threshold approvals via approve_multisig unlock execute_multisig.",
+        "Create a proposal on a Squads multisig: wraps a transfer from the multisig vault into a vault transaction and opens it for votes (status active). `amount` is BASE UNITS: lamports for native SOL (omit mint), token base units with mint (decimals optional, read from the mint when omitted; destination token account is auto-created from vault funds). Threshold approvals via approve_multisig unlock execute_multisig.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet of a multisig member creating the proposal."),
         multisigPda: z.string().describe("Multisig address returned by create_multisig."),
         to: z.string().describe("Recipient wallet address (tokens go to their ATA)."),
-        amount: z.string().describe('Human-readable amount: "1.5" SOL for native, token units (respecting decimals) with mint.'),
+        amount: baseUnitParam(z, "Amount the vault should send"),
         mint: z.string().optional().describe("Token mint address — omit for native SOL."),
-        decimals: z.number().int().min(0).max(18).optional().describe("Required when mint is set."),
+        decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
         vaultIndex: z.number().int().min(0).optional().describe("Vault index when the multisig uses multiple vaults. Default 0."),
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true on mainnet-beta."),
@@ -124,20 +123,22 @@ export function registerMultisigTools(
       const multisigPda = new PublicKey(args.multisigPda);
       const vaultIndex = args.vaultIndex ?? 0;
       const vaultPda = deriveVaultPda(multisigPda, vaultIndex)[0];
+      if (!args.mint && args.decimals !== undefined) {
+        throw new Error("decimals is only valid for token proposals (mint is set).");
+      }
+      const amount = parseBaseUnits(args.amount, "amount", { decimals: args.decimals, kind: args.mint ? "token" : "SOL" });
+      const decimals = await resolveDecimals(conn, args.mint, args.decimals);
 
       // Token legs are pre-built here with the vault as payer/source owner;
       // SOL legs use core's built-in vault transfer convenience.
       let instructions;
       if (args.mint) {
-        if (args.decimals === undefined) {
-          throw new Error("decimals is required for token proposals (mint is set).");
-        }
         const built = await buildTransferInstructions(conn, {
           payer: vaultPda,
           destination: new PublicKey(args.to),
           mint: new PublicKey(args.mint),
-          amount: parseAmount(args.amount, args.decimals),
-          decimals: args.decimals,
+          amount,
+          decimals,
         });
         instructions = built.instructions;
       }
@@ -146,12 +147,18 @@ export function registerMultisigTools(
         vaultIndex,
         instructions,
         destination: args.mint ? undefined : new PublicKey(args.to),
-        amount: args.mint ? undefined : solToLamports(args.amount),
+        amount: args.mint ? undefined : amount,
         dryRun: args.dryRun,
         allowMainnet: args.allowMainnet,
       });
       return {
         ...result,
+        feeDisplay: solDisplay(result.feeLamports),
+        to: args.to,
+        mint: args.mint ?? null,
+        decimals: decimals ?? null,
+        amountBaseUnits: amount.toString(),
+        amountDisplay: args.mint ? display(amount, decimals) : display(amount, SOL_DECIMALS, "SOL"),
         summary: result.error
           ? `Proposal failed: ${result.error.code}`
           : `Proposal #${result.transactionIndex} created (transaction ${result.transactionPda}). Collect approvals via approve_multisig, then execute_multisig.`,

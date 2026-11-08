@@ -4,8 +4,6 @@ import {
   freezeTokenAccount,
   getWalletBalance,
   mintTokens,
-  formatAmount,
-  parseAmount,
   parseTransactionError,
   setFreezeAuthority,
   setMintAuthority,
@@ -16,7 +14,9 @@ import {
   type TokenManageResult,
 } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT, type TKey } from "../../lib/i18n";
 import { Button, Card, Input, Label } from "../../components/ui";
+import { AmountHint, AmountValue, parseBaseUnits } from "../../components/Amount";
 import { ResultView } from "../transfer/ResultView";
 import type { SimpleTxOutcome } from "../transfer/ResultView";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -31,14 +31,14 @@ type Action =
   | "setFreezeAuthority"
   | "updateMetadata";
 
-const ACTION_LABEL: Record<Action, string> = {
-  mint: "Mint",
-  burn: "Burn",
-  freeze: "Freeze account",
-  thaw: "Thaw account",
-  setMintAuthority: "Set mint authority",
-  setFreezeAuthority: "Set freeze authority",
-  updateMetadata: "Update metadata",
+const ACTION_LABEL: Record<Action, TKey> = {
+  mint: "token.action.mint",
+  burn: "token.action.burn",
+  freeze: "token.action.freeze",
+  thaw: "token.action.thaw",
+  setMintAuthority: "token.action.setMintAuthority",
+  setFreezeAuthority: "token.action.setFreezeAuthority",
+  updateMetadata: "token.action.updateMetadata",
 };
 
 /** Normalize a core TokenManageResult (which may carry .error instead of throwing) into the UI outcome shape. */
@@ -48,6 +48,7 @@ function toOutcome(res: TokenManageResult): SimpleTxOutcome {
 }
 
 export function TokenManagePage() {
+  const t = useT();
   const { connection, state, currentWallet } = useApp();
   const keypair = state.unlockedKeypair;
   const isMainnet = state.cluster === "mainnet-beta";
@@ -57,7 +58,7 @@ export function TokenManagePage() {
   const [active, setActive] = useState<string | null>(null);
   const [action, setAction] = useState<Action>("mint");
 
-  // mint/burn
+  // mint/burn — raw base units
   const [amount, setAmount] = useState("");
   // freeze/thaw
   const [accountOwner, setAccountOwner] = useState("");
@@ -75,7 +76,7 @@ export function TokenManagePage() {
   const [result, setResult] = useState<SimpleTxOutcome | null>(null);
   const [mainnetAck, setMainnetAck] = useState(false);
 
-  const activeToken = tokens.find((t) => t.mint === active) ?? null;
+  const activeToken = tokens.find((tk) => tk.mint === active) ?? null;
   const isToken2022 = activeToken?.program === "token-2022";
 
   const refresh = () => {
@@ -108,12 +109,12 @@ export function TokenManagePage() {
       let outcome: SimpleTxOutcome;
       switch (action) {
         case "mint": {
-          const base = parseAmount(amount, activeToken.decimals);
+          const base = parseBaseUnits(amount, t);
           outcome = toOutcome(await mintTokens(connection, keypair, activeToken.mint, keypair.publicKey, base, opts));
           break;
         }
         case "burn": {
-          const base = parseAmount(amount, activeToken.decimals);
+          const base = parseBaseUnits(amount, t);
           outcome = toOutcome(await burnTokens(connection, keypair, activeToken.mint, base, opts));
           break;
         }
@@ -161,7 +162,7 @@ export function TokenManagePage() {
   };
 
   const isAuthorityAction = action === "setMintAuthority" || action === "setFreezeAuthority";
-  const authorityLabel = action === "setMintAuthority" ? "mint" : "freeze";
+  const authorityKind = action === "setMintAuthority" ? t("token.manage.kind.mint") : t("token.manage.kind.freeze");
   // Handing the authority to any address other than the current wallet is a loss of control for this wallet.
   const transfersAway =
     isAuthorityAction && !revoke && newAuthority.trim().length > 0 && newAuthority.trim() !== currentWallet?.address;
@@ -185,35 +186,35 @@ export function TokenManagePage() {
   return (
     <Card className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-300">Your token assets</h3>
+        <h3 className="text-sm font-semibold text-zinc-300">{t("token.manage.assets")}</h3>
         <Button variant="ghost" onClick={refresh}>
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? t("common.refreshing") : t("common.refresh")}
         </Button>
       </div>
-      {!currentWallet && <div className="text-sm text-zinc-500">Select a wallet first.</div>}
+      {!currentWallet && <div className="text-sm text-zinc-500">{t("token.manage.selectWallet")}</div>}
       {currentWallet && tokens.length === 0 && !loading && (
-        <div className="text-sm text-zinc-500">No token accounts found.</div>
+        <div className="text-sm text-zinc-500">{t("token.manage.noAccounts")}</div>
       )}
       <ul className="space-y-1">
-        {tokens.map((t) => (
+        {tokens.map((tk) => (
           <li
-            key={t.mint}
+            key={tk.mint}
             className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 ${
-              active === t.mint ? "border-emerald-700 bg-emerald-900/10" : "border-zinc-800"
+              active === tk.mint ? "border-emerald-700 bg-emerald-900/10" : "border-zinc-800"
             }`}
           >
-            <div className="font-mono text-xs text-zinc-400">
-              {t.mint} ({t.program}) — {formatAmount(BigInt(t.amount), t.decimals)}
+            <div className="min-w-0 break-all font-mono text-xs text-zinc-400">
+              {tk.mint} ({tk.program}) — <AmountValue raw={tk.amount} decimals={tk.decimals} />
             </div>
             <Button
               variant="default"
               onClick={() => {
-                setActive(t.mint);
+                setActive(tk.mint);
                 setAction("mint");
                 setResult(null);
               }}
             >
-              Manage
+              {t("token.manage.manage")}
             </Button>
           </li>
         ))}
@@ -232,21 +233,22 @@ export function TokenManagePage() {
                   setResult(null);
                 }}
               >
-                {ACTION_LABEL[a]}
+                {t(ACTION_LABEL[a])}
               </Button>
             ))}
           </div>
 
           {(action === "mint" || action === "burn") && (
             <div>
-              <Label htmlFor="tokenmanagepage-amount">Amount</Label>
-              <Input id="tokenmanagepage-amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Label htmlFor="tokenmanagepage-amount">{t("token.manage.amount")}</Label>
+              <Input id="tokenmanagepage-amount" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <AmountHint value={amount} decimals={activeToken.decimals} />
             </div>
           )}
 
           {(action === "freeze" || action === "thaw") && (
             <div>
-              <Label htmlFor="tokenmanagepage-account-owner">Account owner (defaults to current wallet)</Label>
+              <Label htmlFor="tokenmanagepage-account-owner">{t("token.manage.accountOwner")}</Label>
               <Input id="tokenmanagepage-account-owner" value={accountOwner} onChange={(e) => setAccountOwner(e.target.value)} />
             </div>
           )}
@@ -254,17 +256,18 @@ export function TokenManagePage() {
           {(action === "setMintAuthority" || action === "setFreezeAuthority") && (
             <div className="space-y-2">
               <div>
-                <Label htmlFor="tokenmanagepage-new-authority-address">New authority address</Label>
-                <Input id="tokenmanagepage-new-authority-address"
+                <Label htmlFor="tokenmanagepage-new-authority-address">{t("token.manage.newAuthority")}</Label>
+                <Input
+                  id="tokenmanagepage-new-authority-address"
                   value={newAuthority}
                   disabled={revoke}
                   onChange={(e) => setNewAuthority(e.target.value)}
-                  placeholder="New authority public key"
+                  placeholder={t("token.manage.newAuthorityPlaceholder")}
                 />
               </div>
               <label className="flex items-center gap-2 text-sm text-amber-300">
                 <input type="checkbox" checked={revoke} onChange={(e) => setRevoke(e.target.checked)} />
-                Permanently revoke this authority instead (irreversible)
+                {t("token.manage.revoke")}
               </label>
             </div>
           )}
@@ -272,8 +275,9 @@ export function TokenManagePage() {
           {action === "updateMetadata" && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <Label htmlFor="tokenmanagepage-field">Field</Label>
-                <select id="tokenmanagepage-field"
+                <Label htmlFor="tokenmanagepage-field">{t("token.manage.field")}</Label>
+                <select
+                  id="tokenmanagepage-field"
                   className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100"
                   value={metaField}
                   onChange={(e) => setMetaField(e.target.value as typeof metaField)}
@@ -286,12 +290,12 @@ export function TokenManagePage() {
               </div>
               {metaField === "custom" && (
                 <div>
-                  <Label htmlFor="tokenmanagepage-custom-field-key">Custom field key</Label>
+                  <Label htmlFor="tokenmanagepage-custom-field-key">{t("token.manage.customKey")}</Label>
                   <Input id="tokenmanagepage-custom-field-key" value={metaCustomField} onChange={(e) => setMetaCustomField(e.target.value)} />
                 </div>
               )}
               <div className={metaField === "custom" ? "sm:col-span-2" : ""}>
-                <Label htmlFor="tokenmanagepage-new-value">New value</Label>
+                <Label htmlFor="tokenmanagepage-new-value">{t("token.manage.newValue")}</Label>
                 <Input id="tokenmanagepage-new-value" value={metaValue} onChange={(e) => setMetaValue(e.target.value)} />
               </div>
             </div>
@@ -300,12 +304,12 @@ export function TokenManagePage() {
           {isMainnet && (
             <label className="flex items-center gap-2 text-sm text-amber-300">
               <input type="checkbox" checked={mainnetAck} onChange={(e) => setMainnetAck(e.target.checked)} />
-              I confirm this action on mainnet-beta.
+              {t("token.manage.mainnetAck")}
             </label>
           )}
 
           <Button variant="primary" disabled={busy || !keypair} onClick={run}>
-            {busy ? "Working…" : ACTION_LABEL[action]}
+            {busy ? t("token.manage.working") : t(ACTION_LABEL[action])}
           </Button>
 
           <ResultView result={result} />
@@ -314,21 +318,20 @@ export function TokenManagePage() {
 
       {confirmingTransfer && activeToken && (
         <ConfirmDialog
-          title={`Transfer ${authorityLabel} authority`}
+          title={t("token.manage.transferTitle", { kind: authorityKind })}
           description={
             <div className="space-y-1">
-              <div>
-                This hands the {authorityLabel} authority of <span className="font-mono text-xs">{activeToken.mint}</span>{" "}
-                to <span className="font-mono text-xs">{newAuthority.trim()}</span>.
+              <div className="break-all">
+                {t("token.manage.transferDesc", { kind: authorityKind, mint: activeToken.mint, to: newAuthority.trim() })}
               </div>
               <div className="text-amber-300">
-                Your current wallet will no longer be able to{" "}
-                {action === "setMintAuthority" ? "mint this token" : "freeze/thaw accounts of this token"}. Only the
-                new authority can hand it back.
+                {t("token.manage.transferWarn", {
+                  ability: action === "setMintAuthority" ? t("token.manage.ability.mint") : t("token.manage.ability.freeze"),
+                })}
               </div>
             </div>
           }
-          confirmLabel="Transfer authority"
+          confirmLabel={t("token.manage.transferConfirm")}
           danger
           onConfirm={() => {
             setConfirmingTransfer(false);
@@ -340,22 +343,19 @@ export function TokenManagePage() {
 
       {confirmingRevoke && activeToken && (
         <ConfirmDialog
-          title={`Revoke ${action === "setMintAuthority" ? "mint" : "freeze"} authority`}
+          title={t("token.manage.revokeTitle", { kind: authorityKind })}
           description={
             <div className="space-y-1">
-              <div>
-                This permanently renounces the {action === "setMintAuthority" ? "mint" : "freeze"} authority of{" "}
-                <span className="font-mono text-xs">{activeToken.mint}</span>.
-              </div>
+              <div className="break-all">{t("token.manage.revokeDesc", { kind: authorityKind, mint: activeToken.mint })}</div>
               <div className="text-amber-300">
-                After this, nobody will ever be able to{" "}
-                {action === "setMintAuthority" ? "mint more of this token" : "freeze/thaw accounts of this token"}{" "}
-                again. This cannot be undone.
+                {t("token.manage.revokeWarn", {
+                  ability: action === "setMintAuthority" ? t("token.manage.ability.mintMore") : t("token.manage.ability.freeze"),
+                })}
               </div>
             </div>
           }
           requireText="REVOKE"
-          confirmLabel="Revoke permanently"
+          confirmLabel={t("token.manage.revokeConfirm")}
           danger
           onConfirm={() => {
             setConfirmingRevoke(false);

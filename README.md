@@ -119,9 +119,9 @@ claude mcp add solwallet \
 | `list_wallets` | 列出内存中的钱包（名称 / 地址 / 来源，无密钥） |
 | `export_secret` | 导出密钥材料（`mnemonic` 或 `keyfileJson`），必须显式传 `dangerouslyAllowSecretExport: true` |
 | `get_cluster_status` | 集群健康：slot、节点版本、近似 TPS |
-| `request_airdrop` | 水龙头请求（拒绝 mainnet-beta，其余集群交给远端） |
-| `get_balances` | 全量余额：SOL + 全部 SPL / Token-2022 账户 |
-| `transfer` | 单笔转账：SOL（省略 mint）或代币（mint + decimals 必填）。默认先预检，block 级发现返回 `PREFLIGHT_BLOCKED`（`force: true` 越过）；接受构造旋钮 `computeUnitLimit` / `computeUnitPrice` / `ataMode` / `instruction` / `fee` / `memo` / `sourceOwner` / `authorityWallet`；返回 `plan` 与 `preflight` |
+| `request_airdrop` | 水龙头请求，`lamports` 传 base units（拒绝 mainnet-beta，其余集群交给远端） |
+| `get_balances` | 全量余额：SOL + 全部 SPL / Token-2022 账户（raw `solLamports` / `amount` + `solDisplay` / `display` 提示） |
+| `transfer` | 单笔转账：SOL（省略 mint，`amount` 为 lamports）或代币（传 mint，`amount` 为 base units，decimals 可省、自动从 mint 读）。默认先预检，block 级发现返回 `PREFLIGHT_BLOCKED`（`force: true` 越过）；接受构造旋钮 `computeUnitLimit` / `computeUnitPrice` / `ataMode` / `instruction` / `fee` / `memo` / `sourceOwner` / `authorityWallet`；返回 `plan` 与 `preflight` |
 | `batch_transfer` | 一对多批量（1–50 接收者），按 chunkSize 分块串行发送 |
 | `mixed_transfer` | 一笔交易 2–10 条腿（SOL + 多个不同 mint），共享一个签名 |
 | `build_transfer` | 只构造不签不发：返回 `TransactionPlan`（每条指令的 label / programId / accounts / dataHex、message hex、估算字节、signers、blockhash） |
@@ -148,30 +148,27 @@ claude mcp add solwallet \
 
 转账层自动识别 mint 属于 Token Program 还是 Token-2022，无需指定程序。
 
-MCP 输出里的金额一律是 raw base units 字符串，**不含 `uiAmount`**；每个带签名的结果附 `explorerUrl`；链上程序错误附 `error.custom = { code, name }`（如 36 = `NoMemo`、31 = `MintMismatch`）。
+MCP 输出里的金额一律是 raw base units 字符串，**不含 `uiAmount`**；较大的金额旁边附一个 `*Display` 可读提示（`amountDisplay`、`solDisplay`、`feeDisplay`、`expectedFeeDisplay` / `netDisplay`、`supplyDisplay`、`balanceDeltaDisplay`、余额里的 `display`，形如 `"1.5 SOL"` / `"0.25 (6 dp)"`）；每个带签名的结果附 `explorerUrl`；链上程序错误附 `error.custom = { code, name }`（如 36 = `NoMemo`、31 = `MintMismatch`）。
 
-### 金额单位例外
+### 金额单位：全部 base units
 
-绝大多数金额字段是**人类可读字符串**（`"1.5"`），由 core 精确换算成 base units。只有下面这些字段是 **base units 整数字符串**（不是人类可读，传 `"1.5"` 会被拒绝并提示 `INVALID_INPUT`）：
+**所有工具的所有金额输入都是 base units 整数字符串**（lamports / 代币最小单位，和区块浏览器一致），没有人类可读的字段。传 `"1.5"` 会被 schema 拒绝并提示 `INVALID_INPUT`：
 
-| 工具 | 字段 | 说明 |
+| 资产 | 换算 | 例子 |
 |---|---|---|
-| `create_token` | `extensions.transferFeeConfig.maximumFee` | 单笔转账最高手续费，base units |
-| `create_token` | `mintTo.amount` | 初始铸造数量，base units |
-| `manage_token2022` | `params.amount`（`mintTokens` / `burnTokens`） | 铸造 / 销毁数量，base units |
-| `manage_token2022` | `params.maximumFee`（`setTransferFee`） | base units |
-| `transfer` / `build_transfer` / `preflight_transfer` | `fee`（配合 `instruction: "transferCheckedWithFee"`） | 声明手续费，base units |
+| SOL | `lamports = SOL × 10^9` | 1 SOL → `"1000000000"`，0.01 SOL → `"10000000"` |
+| 代币 | `base units = 数量 × 10^decimals` | 6 位小数的代币 1.5 个 → `"1500000"` |
 
-换算：`base units = 人类可读数量 × 10^decimals`。6 位小数的代币，铸 1.5 个传 `"1500000"`。
+适用：`transfer` / `build_transfer` / `preflight_transfer` / `cpi_token_transfer` / `approve_delegate` / `propose_multisig` 的 `amount`、`batch_transfer.recipients[].amount`、`mixed_transfer.legs[].amount`（sol 腿是 lamports）、`request_airdrop.lamports`、`create_token.mintTo.amount` 与 `extensions.transferFeeConfig.maximumFee`、`manage_token2022.params.amount` / `params.maximumFee`、`fee`。
 
-人类可读的字段：`transfer.amount`、`batch_transfer.recipients[].amount`、`mixed_transfer.legs[].amount`、`propose_multisig.amount`、`request_airdrop.sol`。
+代币工具的 `decimals` 可选：省略时自动从 mint 读取（多一次 RPC 读），传了就省这次读；它只用于链上 `transferChecked` 校验与 `*Display` 提示，**不参与金额换算**。
 
 ### 返回值约定：`isError` 与 `error`
 
 - 工具抛错（参数错误、RPC 失败、发送失败）：返回 `isError: true`，正文是 `{ "error": { "code", "message", "suggestion" } }`。
 - 工具没抛错但结果本身表示失败（正文带非空 `error` 字段，或 `ok: false`，例如 dry-run 模拟失败、`create_token` / `manage_token2022` / `mixed_transfer` 的链上失败、`batch_transfer` 的某块失败）：同样标记 `isError: true`，正文原样保留（日志、已成功的块等信息都在）。
 - 调用方不要只看 `isError`：先读正文 `error.suggestion`（它说明怎么修），再决定重试还是改参数。
-- 输入类错误（钱包不存在、地址非 base58、代币腿缺 mint / decimals、base-unit 字段传了小数、同名钱包冲突等）统一 `code: "INVALID_INPUT"`，建议指向检查参数，不会让你去区块浏览器找交易——这类错误根本没有上链。
+- 输入类错误（钱包不存在、地址非 base58、代币腿缺 mint、金额不是 base units 整数串、同名钱包冲突等）统一 `code: "INVALID_INPUT"`，建议指向检查参数，不会让你去区块浏览器找交易——这类错误根本没有上链。
 
 ## 作为 npm 库使用
 
@@ -202,7 +199,7 @@ await transfer(conn, {
 });
 ```
 
-金额一律走精确换算：`solToLamports` / `parseAmount` 把人类可读字符串转成 base units（bigint），精度不足直接抛 `AMOUNT_TOO_PRECISE`，不存在浮点误差。
+core 的 API 直接收 base units（bigint）；`solToLamports` / `parseAmount` / `formatAmount` 是给脚本和 UI 用的精确换算（string + bigint，精度不足直接抛 `AMOUNT_TOO_PRECISE`，不存在浮点误差）。MCP 层不做换算，输入即 base units。
 
 完整的"建 mint → `buildTransferPlan` → `preflightTransfer` → `transfer` → `inspectTransaction`"链路见 `examples/`（三个脚本，`pnpm example examples/<name>.ts`，对本地 `solana-test-validator` 运行，输出 JSON 报告；说明见 `examples/README.md`）。
 

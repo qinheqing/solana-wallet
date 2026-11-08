@@ -149,8 +149,9 @@ async function main() {
     S.victim = (await call("create_wallet", { name: "victim" })).data;
     check("payer address present", typeof S.payer.address === "string" && S.payer.address.length >= 32, S.payer.address);
     for (const [name, sol] of [["payer", "10"], ["recipient", "2"], ["victim", "2"]]) {
-      const a = await call("request_airdrop", { walletName: name, sol });
-      check(`request_airdrop ${name} ${sol} SOL`, !a.isError, a.isError ? a.raw : a.data.signature);
+      const lamports = `${sol}000000000`; // base units: SOL × 10^9
+      const a = await call("request_airdrop", { walletName: name, lamports });
+      check(`request_airdrop ${name} ${sol} SOL (${lamports} lamports)`, !a.isError && a.data.solDisplay === `${sol} SOL`, a.isError ? a.raw : `${a.data.signature} ${a.data.solDisplay}`);
     }
     note("payer", S.payer.address);
     note("recipient", S.recipient.address);
@@ -197,7 +198,7 @@ async function main() {
 
   // --- 2 ---------------------------------------------------------------------
   await runScenario("2", "build_transfer knobs → preflight TRANSFER_FEE → transfer → inspect_transaction fee/net → withheld → no uiAmount", async () => {
-    const base = { walletName: "payer", to: S.recipient.address, amount: "1", mint: S.feeMint, decimals: DEC };
+    const base = { walletName: "payer", to: S.recipient.address, amount: "1000000", mint: S.feeMint, decimals: DEC };
     const b = await call("build_transfer", { ...base, computeUnitLimit: 200000, computeUnitPrice: 1, ataMode: "always-idempotent" });
     check("build_transfer ok", !b.isError, b.isError ? b.raw : undefined);
     const labels = b.data.labels ?? b.data.plan?.instructions?.map((i) => i.label);
@@ -209,6 +210,11 @@ async function main() {
     check("plan.messageHex non-empty", typeof b.data.plan?.messageHex === "string" && b.data.plan.messageHex.length > 0, `len=${b.data.plan?.messageHex?.length}`);
     check("plan.signers == [payer]", JSON.stringify(b.data.plan?.signers) === JSON.stringify([S.payer.address]), JSON.stringify(b.data.plan?.signers));
     check("amountBaseUnits == 1000000", b.data.amountBaseUnits === "1000000", b.data.amountBaseUnits);
+    check("amountDisplay == '1 (6 dp)' (base-unit input echoed with display hint)", b.data.amountDisplay === "1 (6 dp)", b.data.amountDisplay);
+    const noDec = await call("build_transfer", { walletName: "payer", to: S.recipient.address, amount: "1000000", mint: S.feeMint });
+    check("build_transfer without decimals resolves decimals=6 from the mint", !noDec.isError && noDec.data.decimals === DEC && noDec.data.amountBaseUnits === "1000000", noDec.isError ? noDec.raw : JSON.stringify({ decimals: noDec.data.decimals }));
+    const human = await call("build_transfer", { ...base, amount: "1.5" });
+    check("build_transfer amount '1.5' rejected (base units only)", human.isError && /base units/.test(human.raw), trunc(human.raw, 200));
     S.recipientFeeAta = b.data.destinationAta;
 
     const pf = await call("preflight_transfer", base);
@@ -242,6 +248,7 @@ async function main() {
     check("get_balances has no uiAmount key anywhere", !bal.isError && !hasKeyDeep(bal.data, "uiAmount"), trunc(bal.raw, 300));
     const tok = (bal.data.tokens ?? bal.data.tokenBalances ?? []).find?.((t) => t.mint === S.feeMint);
     check("get_balances lists feeMint raw amount 99000000", tok && (tok.amount === "99000000" || tok.amountBaseUnits === "99000000"), JSON.stringify(tok));
+    check("get_balances token display == '99 (6 dp)' and solDisplay ends with SOL", tok?.display === "99 (6 dp)" && /SOL$/.test(bal.data.solDisplay ?? ""), JSON.stringify({ display: tok?.display, solDisplay: bal.data.solDisplay }));
   });
 
   // --- 3 ---------------------------------------------------------------------
@@ -253,7 +260,7 @@ async function main() {
     const memo = findExt(ta.data.extensions, "MemoTransfer");
     check("inspect_token_account MemoTransfer.requireIncomingTransferMemos true", memo?.requireIncomingTransferMemos === true, JSON.stringify(memo));
 
-    const base = { walletName: "payer", to: S.recipient.address, amount: "1", mint: S.feeMint, decimals: DEC };
+    const base = { walletName: "payer", to: S.recipient.address, amount: "1000000", mint: S.feeMint, decimals: DEC };
     const blocked = await call("transfer", base);
     check("transfer blocked: isError + error.code PREFLIGHT_BLOCKED", blocked.isError && blocked.data.error?.code === "PREFLIGHT_BLOCKED", trunc(blocked.raw, 200));
     check("blocked result has MEMO_REQUIRED block finding", findFinding(blocked.data.preflight, "MEMO_REQUIRED")?.severity === "block", JSON.stringify(blocked.data.preflight?.findings?.map((f) => f.code)));
@@ -312,7 +319,7 @@ async function main() {
     const m = await call("inspect_mint", { mint: S.pdMint });
     check("inspect_mint PermanentDelegate.delegate == payer", findExt(m.data.extensions, "PermanentDelegate")?.delegate === S.payer.address, JSON.stringify(findExt(m.data.extensions, "PermanentDelegate")));
 
-    const args = { walletName: "payer", sourceOwner: S.victim.address, to: S.payer.address, amount: "0.5", mint: S.pdMint, decimals: DEC };
+    const args = { walletName: "payer", sourceOwner: S.victim.address, to: S.payer.address, amount: "500000", mint: S.pdMint, decimals: DEC };
     const pf = await call("preflight_transfer", args);
     check("preflight PERMANENT_DELEGATE_TRANSFER finding", Boolean(findFinding(pf.data, "PERMANENT_DELEGATE_TRANSFER")), JSON.stringify(pf.data.findings?.map((f) => `${f.code}:${f.severity}`)));
     check("preflight ok=true", pf.data.ok === true, JSON.stringify(pf.data.blocking));
@@ -333,29 +340,29 @@ async function main() {
     S.plainMint = t.data.mint;
     note("plainMint", S.plainMint);
 
-    const ap = await call("approve_delegate", { walletName: "victim", mint: S.plainMint, delegate: S.payer.address, amount: "0.0005", decimals: DEC });
+    const ap = await call("approve_delegate", { walletName: "victim", mint: S.plainMint, delegate: S.payer.address, amount: "500", decimals: DEC });
     check("approve_delegate 500 base units ok", !ap.isError && ap.data.amountBaseUnits === "500", ap.isError ? ap.raw : JSON.stringify({ sig: ap.data.signature, base: ap.data.amountBaseUnits }));
     const dta = (await call("derive_address", { owner: S.victim.address, mint: S.plainMint })).data.token2022.address;
     const acct = await call("inspect_token_account", { address: dta });
     check("victim ATA delegate == payer, delegatedAmount 500", acct.data.delegate === S.payer.address && acct.data.delegatedAmount === "500", JSON.stringify({ delegate: acct.data.delegate, delegatedAmount: acct.data.delegatedAmount }));
 
     const args = { walletName: "payer", sourceOwner: S.victim.address, to: S.payer.address, mint: S.plainMint, decimals: DEC };
-    const over = await call("transfer", { ...args, amount: "0.001" });
+    const over = await call("transfer", { ...args, amount: "1000" });
     check("transfer 1000 blocked PREFLIGHT_BLOCKED + INSUFFICIENT_DELEGATED_AMOUNT", over.isError && over.data.error?.code === "PREFLIGHT_BLOCKED" && findFinding(over.data.preflight, "INSUFFICIENT_DELEGATED_AMOUNT")?.severity === "block", trunc(over.raw, 300));
 
-    const within = await call("transfer", { ...args, amount: "0.0004" });
+    const within = await call("transfer", { ...args, amount: "400" });
     check("transfer 400 ok", !within.isError && Boolean(within.data.signature), within.isError ? within.raw : within.data.signature);
     check("transfer 400 preflight has DELEGATE_TRANSFER info", findFinding(within.data.preflight, "DELEGATE_TRANSFER")?.severity === "info", JSON.stringify(within.data.preflight?.findings?.map((f) => `${f.code}:${f.severity}`)));
 
     const rv = await call("revoke_delegate", { walletName: "victim", mint: S.plainMint });
     check("revoke_delegate ok", !rv.isError, rv.isError ? rv.raw : rv.data.signature);
-    const after = await call("transfer", { ...args, amount: "0.0001" });
+    const after = await call("transfer", { ...args, amount: "100" });
     check("post-revoke transfer blocked AUTHORITY_NOT_DELEGATE", after.isError && after.data.error?.code === "PREFLIGHT_BLOCKED" && findFinding(after.data.preflight, "AUTHORITY_NOT_DELEGATE")?.severity === "block", trunc(after.raw, 300));
   });
 
   // --- 7 ---------------------------------------------------------------------
   await runScenario("7", "instruction=transfer (03) → on-chain custom 31; ataMode=create on existing ATA fails", async () => {
-    const base = { walletName: "payer", to: S.recipient.address, amount: "0.1", mint: S.feeMint, decimals: DEC };
+    const base = { walletName: "payer", to: S.recipient.address, amount: "100000", mint: S.feeMint, decimals: DEC };
     const b = await call("build_transfer", { ...base, instruction: "transfer" });
     const ix = b.data.plan?.instructions?.find((i) => i.label === "transfer");
     check("build_transfer instruction=transfer → label 'transfer' dataHex starts 03", ix?.dataHex?.startsWith("03"), JSON.stringify(b.data.plan?.instructions?.map((i) => [i.label, i.dataHex])));
@@ -375,7 +382,7 @@ async function main() {
 
   // --- 8 ---------------------------------------------------------------------
   await runScenario("8", "raw channel: dryRun plan.messageHex → local VersionedTransaction → sign_transaction → simulate → send", async () => {
-    const dry = await call("transfer", { walletName: "payer", to: S.recipient.address, amount: "0.1", mint: S.feeMint, decimals: DEC, dryRun: true });
+    const dry = await call("transfer", { walletName: "payer", to: S.recipient.address, amount: "100000", mint: S.feeMint, decimals: DEC, dryRun: true });
     check("transfer dryRun ok + simulatedOnly", !dry.isError && dry.data.simulatedOnly === true && dry.data.ok === true, trunc(dry.raw, 200));
     const hex = dry.data.plan?.messageHex;
     check("dryRun plan.messageHex present", typeof hex === "string" && hex.length > 0);
@@ -433,9 +440,9 @@ async function main() {
     if (!info?.executable) return skip(`program ${programId} not deployed on ${RPC_URL} (solana program deploy packages/cpi-program/target/deploy/solwallet_cpi.so --program-id …/solwallet_cpi-keypair.json)`);
     note("cpiProgram", programId);
 
-    const r = await call("cpi_token_transfer", { walletName: "payer", programId, destination: S.victim.address, mint: S.feeMint, amount: "0.2", decimals: DEC });
+    const r = await call("cpi_token_transfer", { walletName: "payer", programId, destination: S.victim.address, mint: S.feeMint, amount: "200000" });
     check("cpi_token_transfer ok with signature", !r.isError && Boolean(r.data.signature), r.isError ? r.raw : r.data.signature);
-    check("cpi_token_transfer program token-2022, amountBaseUnits 200000, destinationAtaCreated", r.data.program === "token-2022" && r.data.amountBaseUnits === "200000" && r.data.destinationAtaCreated === true, JSON.stringify({ program: r.data.program, base: r.data.amountBaseUnits, created: r.data.destinationAtaCreated }));
+    check("cpi_token_transfer program token-2022, amountBaseUnits 200000 (decimals auto-resolved), destinationAtaCreated", r.data.program === "token-2022" && r.data.amountBaseUnits === "200000" && r.data.decimals === DEC && r.data.destinationAtaCreated === true, JSON.stringify({ program: r.data.program, base: r.data.amountBaseUnits, created: r.data.destinationAtaCreated }));
     const ins = await call("inspect_transaction", { signature: r.data.signature });
     const mv = ins.data.movements ?? [];
     const inner = mv.find((m) => m.instructionType === "transferChecked");

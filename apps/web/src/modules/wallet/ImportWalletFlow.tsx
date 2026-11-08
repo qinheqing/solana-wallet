@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { DERIVATION_PRESETS, importFromMnemonic, parseKeypairJson } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
+import { useT } from "../../lib/i18n";
 import { Button, Card, Input, Label, RiskBanner, Textarea } from "../../components/ui";
 
 type Mode = "keyfile" | "mnemonic";
 
 export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
+  const t = useT();
   const { addWallet } = useApp();
   const [mode, setMode] = useState<Mode>("keyfile");
   const [keyfileJson, setKeyfileJson] = useState("");
@@ -38,21 +40,22 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
 
   return (
     <Card className="space-y-4">
-      <h3 className="text-sm font-semibold text-zinc-300">Import an existing wallet</h3>
+      <h3 className="text-sm font-semibold text-zinc-300">{t("wallet.imp.title")}</h3>
 
       <div className="flex gap-2">
         <Button variant={mode === "keyfile" ? "primary" : "default"} onClick={() => setMode("keyfile")}>
-          Keyfile JSON
+          {t("wallet.imp.keyfile")}
         </Button>
         <Button variant={mode === "mnemonic" ? "primary" : "default"} onClick={() => setMode("mnemonic")}>
-          Mnemonic
+          {t("wallet.imp.mnemonic")}
         </Button>
       </div>
 
       {mode === "keyfile" && (
         <div>
-          <Label htmlFor="importwalletflow-solana-keygen-json">solana-keygen JSON (64-byte array)</Label>
-          <Textarea id="importwalletflow-solana-keygen-json"
+          <Label htmlFor="importwalletflow-solana-keygen-json">{t("wallet.imp.keyfileLabel")}</Label>
+          <Textarea
+            id="importwalletflow-solana-keygen-json"
             rows={4}
             value={keyfileJson}
             onChange={(e) => setKeyfileJson(e.target.value)}
@@ -64,12 +67,19 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
       {mode === "mnemonic" && (
         <div className="space-y-3">
           <div>
-            <Label htmlFor="importwalletflow-mnemonic-phrase">Mnemonic phrase</Label>
-            <Textarea id="importwalletflow-mnemonic-phrase" rows={2} value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="word1 word2 ..." />
+            <Label htmlFor="importwalletflow-mnemonic-phrase">{t("wallet.imp.mnemonicLabel")}</Label>
+            <Textarea
+              id="importwalletflow-mnemonic-phrase"
+              rows={2}
+              value={mnemonic}
+              onChange={(e) => setMnemonic(e.target.value)}
+              placeholder={t("wallet.imp.mnemonicPlaceholder")}
+            />
           </div>
           <div>
-            <Label htmlFor="importwalletflow-derivation-path">Derivation path</Label>
-            <select id="importwalletflow-derivation-path"
+            <Label htmlFor="importwalletflow-derivation-path">{t("wallet.imp.path")}</Label>
+            <select
+              id="importwalletflow-derivation-path"
               value={path}
               onChange={(e) => setPath(e.target.value)}
               className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 focus:border-emerald-600 focus:outline-none"
@@ -86,26 +96,24 @@ export function ImportWalletFlow({ onDone }: { onDone: () => void }) {
 
       <div className="space-y-3 border-t border-zinc-800 pt-3">
         <div>
-          <Label htmlFor="importwalletflow-wallet-name">Wallet name</Label>
-          <Input id="importwalletflow-wallet-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. imported-1" />
+          <Label htmlFor="importwalletflow-wallet-name">{t("wallet.gen.name")}</Label>
+          <Input id="importwalletflow-wallet-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("wallet.imp.namePlaceholder")} />
         </div>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={usePassword} onChange={(e) => setUsePassword(e.target.checked)} />
-          Encrypt with a password (recommended)
+          {t("wallet.gen.encrypt")}
         </label>
         {usePassword ? (
           <div>
-            <Label htmlFor="importwalletflow-password">Password (min 8 chars)</Label>
+            <Label htmlFor="importwalletflow-password">{t("wallet.gen.password")}</Label>
             <Input id="importwalletflow-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
         ) : (
-          <RiskBanner>
-            Without a password, the secret key is stored in plaintext in this browser&apos;s localStorage.
-          </RiskBanner>
+          <RiskBanner>{t("wallet.imp.plaintextWarn")}</RiskBanner>
         )}
         {error && <div className="text-sm text-red-400">{error}</div>}
         <Button variant="primary" disabled={!canSave || busy} onClick={save}>
-          {busy ? "Importing…" : "Import wallet"}
+          {busy ? t("wallet.imp.importing") : t("wallet.imp.import")}
         </Button>
       </div>
     </Card>

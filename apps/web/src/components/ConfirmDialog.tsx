@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Button } from "./ui";
+import { useT } from "../lib/i18n";
 
 interface ConfirmDialogProps {
   title: string;
@@ -16,11 +17,12 @@ export function ConfirmDialog({
   title,
   description,
   requireText,
-  confirmLabel = "Confirm",
+  confirmLabel,
   danger = true,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const t = useT();
   const [typed, setTyped] = useState("");
   const locked = requireText !== undefined && typed !== requireText;
 
@@ -32,7 +34,7 @@ export function ConfirmDialog({
         {requireText !== undefined && (
           <div className="mb-4">
             <label htmlFor="confirm-dialog-typed" className="mb-1 block text-xs text-zinc-400">
-              Type &quot;{requireText}&quot; to confirm
+              {t("dialog.typeToConfirm", { text: requireText })}
             </label>
             <input
               id="confirm-dialog-typed"
@@ -45,10 +47,10 @@ export function ConfirmDialog({
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant={danger ? "danger" : "primary"} disabled={locked} onClick={onConfirm}>
-            {confirmLabel}
+            {confirmLabel ?? t("common.confirm")}
           </Button>
         </div>
       </div>

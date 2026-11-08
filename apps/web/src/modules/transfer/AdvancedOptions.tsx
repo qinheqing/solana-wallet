@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { PublicKey, type AtaMode, type TransferInstructionKind } from "../../lib/coreShim";
 import { Input, Label } from "../../components/ui";
+import { useT, type TFn } from "../../lib/i18n";
 
-/** Form state for the "高级构造" section. All-empty = core defaults. */
+/** Form state for the "Advanced construction" section. All-empty = core defaults. */
 export interface AdvancedState {
   computeUnitLimit: string;
   computeUnitPrice: string;
@@ -40,33 +41,33 @@ export interface AdvancedKnobs {
   sourceOwner?: PublicKey;
 }
 
-function parseIntField(raw: string, label: string): number | undefined {
+function parseIntField(raw: string, field: string, t: TFn): number | undefined {
   const s = raw.trim();
   if (!s) return undefined;
   const n = Number(s);
-  if (!Number.isInteger(n) || n < 0) throw new Error(`${label} 必须是非负整数`);
+  if (!Number.isInteger(n) || n < 0) throw new Error(t("adv.err.nonNegInt", { field }));
   return n;
 }
 
-function parseKeyField(raw: string, label: string): PublicKey | undefined {
+function parseKeyField(raw: string, field: string, t: TFn): PublicKey | undefined {
   const s = raw.trim();
   if (!s) return undefined;
   try {
     return new PublicKey(s);
   } catch {
-    throw new Error(`${label} 不是合法的 base58 公钥`);
+    throw new Error(t("adv.err.pubkey", { field }));
   }
 }
 
 /**
  * Convert form state into core option fields. Only non-default values are
  * emitted so the default form reproduces today's behaviour exactly.
- * Throws an Error with a user-facing message on invalid input.
+ * Throws an Error with a user-facing (translated) message on invalid input.
  */
-export function toKnobs(a: AdvancedState, isToken: boolean): AdvancedKnobs {
+export function toKnobs(a: AdvancedState, isToken: boolean, t: TFn): AdvancedKnobs {
   const out: AdvancedKnobs = {};
-  const unitLimit = parseIntField(a.computeUnitLimit, "computeUnitLimit");
-  const unitPrice = parseIntField(a.computeUnitPrice, "computeUnitPrice");
+  const unitLimit = parseIntField(a.computeUnitLimit, "computeUnitLimit", t);
+  const unitPrice = parseIntField(a.computeUnitPrice, "computeUnitPrice", t);
   if (unitLimit !== undefined || unitPrice !== undefined) {
     out.computeBudget = {
       ...(unitLimit !== undefined ? { unitLimit } : {}),
@@ -80,12 +81,12 @@ export function toKnobs(a: AdvancedState, isToken: boolean): AdvancedKnobs {
   if (a.instruction !== "transferChecked") out.instruction = a.instruction;
   if (a.instruction === "transferCheckedWithFee") {
     const s = a.fee.trim();
-    if (!/^\d+$/.test(s)) throw new Error("fee 必须是基础单位的非负整数（transferCheckedWithFee 需要）");
+    if (!/^\d+$/.test(s)) throw new Error(t("adv.err.fee"));
     out.fee = BigInt(s);
   }
-  const authority = parseKeyField(a.authority, "authority");
+  const authority = parseKeyField(a.authority, "authority", t);
   if (authority) out.authority = authority;
-  const sourceOwner = parseKeyField(a.sourceOwner, "sourceOwner");
+  const sourceOwner = parseKeyField(a.sourceOwner, "sourceOwner", t);
   if (sourceOwner) out.sourceOwner = sourceOwner;
   return out;
 }
@@ -106,6 +107,7 @@ export function AdvancedOptions({
   onChange: (next: AdvancedState) => void;
   isToken: boolean;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const set = <K extends keyof AdvancedState>(k: K, v: AdvancedState[K]) => onChange({ ...value, [k]: v });
   const modified = !isAdvancedDefault(value);
@@ -119,88 +121,80 @@ export function AdvancedOptions({
         aria-expanded={open}
       >
         <span>
-          高级构造{" "}
-          {modified && <span className="ml-1 rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-300">已修改</span>}
+          {t("adv.title")}{" "}
+          {modified && <span className="ml-1 rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-300">{t("adv.modified")}</span>}
         </span>
-        <span className="text-xs text-zinc-500">{open ? "收起 ▲" : "展开 ▼"}</span>
+        <span className="text-xs text-zinc-500">{open ? t("adv.collapse") : t("adv.expand")}</span>
       </button>
       {open && (
         <div className="space-y-3 border-t border-zinc-800 p-3">
-          <p className="text-xs text-zinc-500">
-            留空 / 默认即与常规发送完全一致。非默认值会生成非标准交易，用于测试第三方集成。
-          </p>
+          <p className="text-xs text-zinc-500">{t("adv.intro")}</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label htmlFor="adv-cu-limit">computeUnitLimit（units）</Label>
-              <Input id="adv-cu-limit" inputMode="numeric" placeholder="留空 = 不添加" value={value.computeUnitLimit} onChange={(e) => set("computeUnitLimit", e.target.value)} />
+              <Label htmlFor="adv-cu-limit">{t("adv.cuLimit")}</Label>
+              <Input id="adv-cu-limit" inputMode="numeric" placeholder={t("adv.leaveEmpty")} value={value.computeUnitLimit} onChange={(e) => set("computeUnitLimit", e.target.value)} />
             </div>
             <div>
-              <Label htmlFor="adv-cu-price">computeUnitPrice（microLamports）</Label>
-              <Input id="adv-cu-price" inputMode="numeric" placeholder="留空 = 不添加" value={value.computeUnitPrice} onChange={(e) => set("computeUnitPrice", e.target.value)} />
+              <Label htmlFor="adv-cu-price">{t("adv.cuPrice")}</Label>
+              <Input id="adv-cu-price" inputMode="numeric" placeholder={t("adv.leaveEmpty")} value={value.computeUnitPrice} onChange={(e) => set("computeUnitPrice", e.target.value)} />
             </div>
           </div>
           <div>
-            <Label htmlFor="adv-memo">memo（Memo 程序指令，置于转账前）</Label>
-            <Input id="adv-memo" placeholder="留空 = 不添加" value={value.memo} onChange={(e) => set("memo", e.target.value)} />
+            <Label htmlFor="adv-memo">{t("adv.memo")}</Label>
+            <Input id="adv-memo" placeholder={t("adv.leaveEmpty")} value={value.memo} onChange={(e) => set("memo", e.target.value)} />
           </div>
 
           <div className={isToken ? "space-y-3" : "space-y-3 opacity-50"}>
-            {!isToken && <p className="text-xs text-zinc-500">以下选项仅对代币转账生效（填写 mint 后启用）。</p>}
+            {!isToken && <p className="text-xs text-zinc-500">{t("adv.tokenOnly")}</p>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <Label htmlFor="adv-ata-mode">ataMode（目标 ATA 策略）</Label>
+                <Label htmlFor="adv-ata-mode">{t("adv.ataMode")}</Label>
                 <select id="adv-ata-mode" className={selectCls} disabled={!isToken} value={value.ataMode} onChange={(e) => set("ataMode", e.target.value as AtaMode)}>
-                  <option value="auto">auto（缺失时幂等创建，默认）</option>
-                  <option value="always-idempotent">always-idempotent（总是幂等创建）</option>
-                  <option value="create">create（非幂等创建，已存在则链上失败）</option>
-                  <option value="none">none（不创建）</option>
+                  <option value="auto">{t("adv.ata.auto")}</option>
+                  <option value="always-idempotent">{t("adv.ata.alwaysIdempotent")}</option>
+                  <option value="create">{t("adv.ata.create")}</option>
+                  <option value="none">{t("adv.ata.none")}</option>
                 </select>
               </div>
               <div>
-                <Label htmlFor="adv-instruction">instruction（转账指令）</Label>
+                <Label htmlFor="adv-instruction">{t("adv.instruction")}</Label>
                 <select id="adv-instruction" className={selectCls} disabled={!isToken} value={value.instruction} onChange={(e) => set("instruction", e.target.value as TransferInstructionKind)}>
-                  <option value="transferChecked">transferChecked（默认）</option>
-                  <option value="transfer">transfer（不校验 decimals）</option>
-                  <option value="transferCheckedWithFee">transferCheckedWithFee（Token-2022 费率）</option>
+                  <option value="transferChecked">{t("adv.ix.transferChecked")}</option>
+                  <option value="transfer">{t("adv.ix.transfer")}</option>
+                  <option value="transferCheckedWithFee">{t("adv.ix.withFee")}</option>
                 </select>
               </div>
             </div>
             {value.instruction === "transferCheckedWithFee" && (
               <div>
-                <Label htmlFor="adv-fee">fee（期望手续费，基础单位；填 0 可制造 FeeMismatch）</Label>
+                <Label htmlFor="adv-fee">{t("adv.fee")}</Label>
                 <Input id="adv-fee" inputMode="numeric" disabled={!isToken} value={value.fee} onChange={(e) => set("fee", e.target.value)} />
               </div>
             )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <Label htmlFor="adv-authority">authority（可选，委托 / 永久委托签名者）</Label>
-                <Input id="adv-authority" disabled={!isToken} placeholder="默认 = 当前钱包" value={value.authority} onChange={(e) => set("authority", e.target.value)} />
+                <Label htmlFor="adv-authority">{t("adv.authority")}</Label>
+                <Input id="adv-authority" disabled={!isToken} placeholder={t("adv.defaultWallet")} value={value.authority} onChange={(e) => set("authority", e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="adv-source-owner">sourceOwner（可选，源 ATA 的所有者）</Label>
-                <Input id="adv-source-owner" disabled={!isToken} placeholder="默认 = 当前钱包" value={value.sourceOwner} onChange={(e) => set("sourceOwner", e.target.value)} />
+                <Label htmlFor="adv-source-owner">{t("adv.sourceOwner")}</Label>
+                <Input id="adv-source-owner" disabled={!isToken} placeholder={t("adv.defaultWallet")} value={value.sourceOwner} onChange={(e) => set("sourceOwner", e.target.value)} />
               </div>
             </div>
-            {value.authority.trim() && (
-              <p className="text-xs text-amber-300">
-                authority 与当前钱包不同时，发送需要该签名者的私钥（Web 端目前仅能用当前钱包签名，预览仍可查看）。
-              </p>
-            )}
+            {value.authority.trim() && <p className="text-xs text-amber-300">{t("adv.authorityWarn")}</p>}
           </div>
 
           <div className="space-y-1 border-t border-zinc-800 pt-3">
             <label className="flex items-start gap-2 text-sm text-amber-300">
               <input type="checkbox" className="mt-0.5" checked={value.force} onChange={(e) => set("force", e.target.checked)} />
               <span>
-                绕过预检拦截（force）
-                <span className="block text-xs text-amber-400/80">
-                  预检的 block 级发现（TransferHook / 冻结 / MemoTransfer 等）不再阻止发送，由验证器自行判定；通常会在链上失败并扣手续费。
-                </span>
+                {t("adv.force")}
+                <span className="block text-xs text-amber-400/80">{t("adv.forceHint")}</span>
               </span>
             </label>
             <label className="flex items-center gap-2 text-sm text-zinc-300">
               <input type="checkbox" checked={value.skipPreflight} onChange={(e) => set("skipPreflight", e.target.checked)} />
-              跳过预检（skipPreflight，不做额外 RPC 读取，不返回 findings）
+              {t("adv.skipPreflight")}
             </label>
           </div>
         </div>

@@ -212,7 +212,7 @@ describe("solwallet MCP server (11.6)", () => {
     await t.call("list_wallets", {});
     await t.call("get_cluster_status", {});
     await t.call("get_balances", { walletName: "sec-wallet" });
-    await t.call("request_airdrop", { walletName: "sec-wallet", sol: "1" });
+    await t.call("request_airdrop", { walletName: "sec-wallet", lamports: "1000000000" });
 
     // Refused export (missing confirmation flag) must also stay clean.
     const refused = await t.call("export_secret", {
@@ -268,18 +268,19 @@ describe("solwallet MCP server (11.6)", () => {
     await t.cleanup();
   });
 
-  it("transfer tool surfaces structured errors on bad amounts", async () => {
+  it("transfer tool rejects non-base-unit amounts at the schema with a units explanation", async () => {
     const t = await setup();
     await t.call("create_wallet", { name: "w" });
-    const res = await t.call("transfer", {
-      walletName: "w",
-      to: Keypair.generate().publicKey.toBase58(),
-      amount: "-5", // invalid: negative
-    });
-    expect(res.isError).toBe(true);
-    const txt = t.text(res);
-    expect(txt).toContain("AMOUNT_INVALID");
-    expect(txt).toContain("suggestion");
+    for (const amount of ["-5", "1.5", "1e9", ""]) {
+      const res = await t.call("transfer", {
+        walletName: "w",
+        to: Keypair.generate().publicKey.toBase58(),
+        amount,
+      });
+      expect(res.isError).toBe(true);
+      expect(t.text(res)).toMatch(/base units/);
+    }
+    expect(t.rpc.fake.sendRawTransaction).not.toHaveBeenCalled();
     await t.cleanup();
   });
 });
@@ -393,7 +394,7 @@ describe("in-band failures flag isError (fix 3)", () => {
     const res = await t.call("transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "0.1",
+      amount: "100000000",
       dryRun: true,
     });
     expect(res.isError).toBe(true);
@@ -424,7 +425,7 @@ describe("in-band failures flag isError (fix 3)", () => {
     const res = await t.call("transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "0.1",
+      amount: "100000000",
       dryRun: true,
     });
     expect(res.isError).toBeFalsy();
@@ -447,7 +448,7 @@ describe("input mistakes map to INVALID_INPUT, not UNKNOWN (fix 4)", () => {
 
   it("non-base58 address", async () => {
     const t = await setup();
-    const res = await t.call("request_airdrop", { address: "0xNotBase58!!", sol: "1" });
+    const res = await t.call("request_airdrop", { address: "0xNotBase58!!", lamports: "1000000000" });
     expect(res.isError).toBe(true);
     const err = JSON.parse(t.text(res)).error;
     expect(err.code).toBe("INVALID_INPUT");
@@ -469,15 +470,19 @@ describe("input mistakes map to INVALID_INPUT, not UNKNOWN (fix 4)", () => {
     await t.cleanup();
   });
 
-  it("core-classified errors keep their own code (AMOUNT_INVALID)", async () => {
+  it("zero amount passes the schema but is refused as INVALID_INPUT (base units > 0)", async () => {
     const t = await setup();
     await t.call("create_wallet", { name: "w" });
     const res = await t.call("transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "-5",
+      amount: "0",
     });
-    expect(JSON.parse(t.text(res)).error.code).toBe("AMOUNT_INVALID");
+    expect(res.isError).toBe(true);
+    const err = JSON.parse(t.text(res)).error;
+    expect(err.code).toBe("INVALID_INPUT");
+    expect(err.message).toMatch(/greater than 0/);
+    expect(err.suggestion).toMatch(/base units/);
     await t.cleanup();
   });
 });
@@ -489,8 +494,8 @@ describe("mixed_transfer leg validation (fix 5)", () => {
     const res = await t.call("mixed_transfer", {
       walletName: "w",
       legs: [
-        { kind: "sol", to: Keypair.generate().publicKey.toBase58(), amount: "0.1" },
-        { kind: "token", to: Keypair.generate().publicKey.toBase58(), amount: "5", decimals: 6 },
+        { kind: "sol", to: Keypair.generate().publicKey.toBase58(), amount: "100000000" },
+        { kind: "token", to: Keypair.generate().publicKey.toBase58(), amount: "5000000", decimals: 6 },
       ],
     });
     expect(res.isError).toBe(true);
@@ -501,20 +506,51 @@ describe("mixed_transfer leg validation (fix 5)", () => {
     await t.cleanup();
   });
 
-  it("token leg without decimals → INVALID_INPUT naming decimals", async () => {
+  it("token leg without decimals → decimals resolved from the mint; legs echo base units + display", async () => {
+    const t = await setup();
+    const owner = new PublicKey(JSON.parse(t.text(await t.call("create_wallet", { name: "w" }))).address);
+    const mint = Keypair.generate().publicKey;
+    const ownerAta = getAssociatedTokenAddressSync(mint, owner, true, TOKEN_2022_PROGRAM_ID);
+    t.rpc.fake.getAccountInfo.mockImplementation((addr: PublicKey) =>
+      Promise.resolve(
+        addr.equals(mint)
+          ? token2022MintInfo(mintBase({ decimals: 6 }), [])
+          : addr.equals(ownerAta)
+            ? token2022AccountInfo(accountBase({ mint, owner, amount: 50_000_000n }), [ext.immutableOwner()])
+            : null,
+      ),
+    );
+    const res = await t.call("mixed_transfer", {
+      walletName: "w",
+      dryRun: true,
+      legs: [
+        { kind: "sol", to: Keypair.generate().publicKey.toBase58(), amount: "100000000" },
+        { kind: "token", to: Keypair.generate().publicKey.toBase58(), amount: "5000000", mint: mint.toBase58() },
+      ],
+    });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(t.text(res));
+    expect(body.legs[0]).toMatchObject({ amount: "100000000", amountBaseUnits: "100000000", amountDisplay: "0.1 SOL", decimals: null });
+    expect(body.legs[1]).toMatchObject({ amount: "5000000", amountBaseUnits: "5000000", amountDisplay: "5 (6 dp)", decimals: 6 });
+    expect(body.feeDisplay).toMatch(/SOL$/);
+    expect(t.text(res)).not.toContain("uiAmount");
+    await t.cleanup();
+  });
+
+  it("decimals on a sol leg → INVALID_INPUT", async () => {
     const t = await setup();
     await t.call("create_wallet", { name: "w" });
     const res = await t.call("mixed_transfer", {
       walletName: "w",
       legs: [
-        { kind: "sol", to: Keypair.generate().publicKey.toBase58(), amount: "0.1" },
-        { kind: "token", to: Keypair.generate().publicKey.toBase58(), amount: "5", mint: t.rpc.mint.toBase58() },
+        { kind: "sol", to: Keypair.generate().publicKey.toBase58(), amount: "100000000", decimals: 9 },
+        { kind: "sol", to: Keypair.generate().publicKey.toBase58(), amount: "100000000" },
       ],
     });
     expect(res.isError).toBe(true);
     const err = JSON.parse(t.text(res)).error;
     expect(err.code).toBe("INVALID_INPUT");
-    expect(err.message).toMatch(/legs\[1\].*decimals/);
+    expect(err.message).toMatch(/legs\[0\].*only valid for token/);
     await t.cleanup();
   });
 });
@@ -587,7 +623,7 @@ describe("build_transfer + transfer knobs (task 16)", () => {
     const res = await t.call("build_transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "0.5",
+      amount: "500000000",
       computeUnitLimit: 50_000,
       computeUnitPrice: 10,
       memo: "plan-only",
@@ -621,7 +657,7 @@ describe("build_transfer + transfer knobs (task 16)", () => {
     const missing = await t.call("build_transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "1",
+      amount: "1000000",
       mint: t.rpc.mint.toBase58(),
       decimals: 6,
       ataMode: "none",
@@ -633,7 +669,7 @@ describe("build_transfer + transfer knobs (task 16)", () => {
     const badFee = await t.call("build_transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "1",
+      amount: "1000000",
       mint: t.rpc.mint.toBase58(),
       decimals: 6,
       instruction: "transferCheckedWithFee",
@@ -650,7 +686,7 @@ describe("build_transfer + transfer knobs (task 16)", () => {
     const res = await t.call("transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "0.1",
+      amount: "100000000",
       memo: "hi",
       computeUnitPrice: 5,
       dryRun: true,
@@ -672,7 +708,7 @@ describe("build_transfer + transfer knobs (task 16)", () => {
     const res = await t.call("transfer", {
       walletName: "w",
       to: Keypair.generate().publicKey.toBase58(),
-      amount: "1",
+      amount: "1000000",
       mint: t.rpc.mint.toBase58(),
       decimals: 6,
       authorityWallet: "ghost",
@@ -692,7 +728,7 @@ describe("raw transaction tools (task 18)", () => {
         await t.call("build_transfer", {
           walletName: "w",
           to: Keypair.generate().publicKey.toBase58(),
-          amount: "0.25",
+          amount: "250000000",
         }),
       ),
     );
@@ -729,7 +765,7 @@ describe("raw transaction tools (task 18)", () => {
     await t.call("create_wallet", { name: "w" });
     await t.call("create_wallet", { name: "other" });
     const built = JSON.parse(
-      t.text(await t.call("build_transfer", { walletName: "w", to: Keypair.generate().publicKey.toBase58(), amount: "1" })),
+      t.text(await t.call("build_transfer", { walletName: "w", to: Keypair.generate().publicKey.toBase58(), amount: "1000000000" })),
     );
     const unsignedHex = "01" + "00".repeat(64) + built.plan.messageHex;
     const wrong = await t.call("sign_transaction", { transaction: unsignedHex, walletNames: ["other"] });
@@ -750,7 +786,7 @@ describe("raw transaction tools (task 18)", () => {
         await t.call("build_transfer", {
           walletName: "w",
           to: Keypair.generate().publicKey.toBase58(),
-          amount: "1",
+          amount: "1000000000",
           cluster: "mainnet-beta",
         }),
       ),
@@ -807,7 +843,7 @@ describe("preflight_transfer + transfer gating (task 17)", () => {
     const t = await setup();
     const hook = Keypair.generate().publicKey;
     const { mint, to } = await seed(t, { mintExt: [ext.transferHook(Keypair.generate().publicKey, hook)] });
-    const res = await t.call("preflight_transfer", { walletName: "w", to, amount: "1", mint, decimals: 6 });
+    const res = await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6 });
     expect(res.isError).toBe(true);
     const body = JSON.parse(t.text(res));
     expect(body.ok).toBe(false);
@@ -823,10 +859,10 @@ describe("preflight_transfer + transfer gating (task 17)", () => {
   it("blocked by MemoTransfer on the destination; a memo clears it", async () => {
     const t = await setup();
     const { mint, to } = await seed(t, { destExt: [ext.memoTransfer(true)] });
-    const blocked = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1", mint, decimals: 6 })));
+    const blocked = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6 })));
     expect(blocked.ok).toBe(false);
     expect(blocked.blocking).toEqual(["MEMO_REQUIRED"]);
-    const ok = await t.call("preflight_transfer", { walletName: "w", to, amount: "1", mint, decimals: 6, memo: "invoice 1" });
+    const ok = await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6, memo: "invoice 1" });
     expect(ok.isError).toBeFalsy();
     expect(JSON.parse(t.text(ok))).toMatchObject({ ok: true, findings: [], blocking: [] });
     await t.cleanup();
@@ -835,10 +871,10 @@ describe("preflight_transfer + transfer gating (task 17)", () => {
   it("ok with info findings (dest ATA missing) and SOL is always ok", async () => {
     const t = await setup();
     const { mint, to } = await seed(t, { destExt: null });
-    const body = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1", mint, decimals: 6 })));
+    const body = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6 })));
     expect(body.ok).toBe(true);
     expect(body.findings.map((f: { code: string }) => f.code)).toEqual(["DEST_ATA_MISSING"]);
-    const sol = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "0.1" })));
+    const sol = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "100000000" })));
     expect(sol).toMatchObject({ ok: true, findings: [], program: "system", mint: null });
     await t.cleanup();
   });
@@ -846,7 +882,7 @@ describe("preflight_transfer + transfer gating (task 17)", () => {
   it("transfer: blocked → PREFLIGHT_BLOCKED + isError, nothing sent; force sends; skipPreflight omits findings", async () => {
     const t = await setup();
     const { mint, to } = await seed(t, { mintExt: [ext.nonTransferable()] });
-    const args = { walletName: "w", to, amount: "1", mint, decimals: 6 };
+    const args = { walletName: "w", to, amount: "1000000", mint, decimals: 6 };
 
     const blocked = await t.call("transfer", args);
     expect(blocked.isError).toBe(true);
@@ -889,7 +925,7 @@ describe("preflight_transfer + transfer gating (task 17)", () => {
         },
       ),
     );
-    const res = await t.call("transfer", { walletName: "w", to, amount: "1", mint, decimals: 6, force: true });
+    const res = await t.call("transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6, force: true });
     expect(res.isError).toBe(true);
     const body = JSON.parse(t.text(res));
     expect(body.ok).toBe(false);
@@ -913,14 +949,14 @@ describe("preflight_transfer + transfer gating (task 17)", () => {
         }),
       ],
     });
-    const pf = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1", mint, decimals: 6, instruction: "transfer" })));
+    const pf = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6, instruction: "transfer" })));
     expect(pf.ok).toBe(false);
     expect(pf.blocking).toContain("UNCHECKED_TRANSFER_REJECTED");
     const finding = pf.findings.find((f: { code: string }) => f.code === "UNCHECKED_TRANSFER_REJECTED");
     expect(finding.data.extension).toBe("TransferFeeConfig");
     expect(finding.message).toContain("custom error 31");
     // FEE_MISMATCH is a block too now.
-    const bad = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1", mint, decimals: 6, instruction: "transferCheckedWithFee", fee: "1" })));
+    const bad = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint, decimals: 6, instruction: "transferCheckedWithFee", fee: "1" })));
     expect(bad.blocking).toContain("FEE_MISMATCH");
     await t.cleanup();
   });
@@ -965,6 +1001,9 @@ describe("create_token presets + manage_token2022 T-G actions (tasks 20, 21)", (
     const body = JSON.parse(t.text(res));
     expect(body.tokenProgram).toBe("spl-token");
     expect(body.mintTo).toMatchObject({ owner, amount: "12345", signature: "SIG_TX" });
+    expect(body.mintTo.amountDisplay).toBe("123.45 (2 dp)");
+    expect(body.decimals).toBe(2);
+    expect(body.feeDisplay).toMatch(/SOL$/);
     expect(t.rpc.fake.sendRawTransaction).toHaveBeenCalledTimes(2);
     await t.cleanup();
   });
@@ -1098,7 +1137,7 @@ describe("approve_delegate / revoke_delegate + delegate transfer (task 22)", () 
   it("approve_delegate sends ApproveChecked; then a delegate transfer plan shows the delegate as sole signer/authority", async () => {
     const t = await setup();
     const { owner, del, mint, to, approve: chainApprove } = await seed(t);
-    const approve = await t.call("approve_delegate", { walletName: "owner", mint, delegate: del.toBase58(), amount: "2", decimals: 6 });
+    const approve = await t.call("approve_delegate", { walletName: "owner", mint, delegate: del.toBase58(), amount: "2000000", decimals: 6 });
     expect(approve.isError).toBeFalsy();
     const a = JSON.parse(t.text(approve));
     expect(a).toMatchObject({ ok: true, signature: "SIG_TX", program: "token-2022", owner: owner.toBase58(), delegate: del.toBase58(), amountBaseUnits: "2000000" });
@@ -1110,17 +1149,17 @@ describe("approve_delegate / revoke_delegate + delegate transfer (task 22)", () 
 
     // The chain state now (fixture) names `del` as delegate with 2_000_000 allowance.
     chainApprove(true);
-    const plan = JSON.parse(t.text(await t.call("build_transfer", { walletName: "del", sourceOwner: owner.toBase58(), to, amount: "1", mint, decimals: 6 })));
+    const plan = JSON.parse(t.text(await t.call("build_transfer", { walletName: "del", sourceOwner: owner.toBase58(), to, amount: "1000000", mint, decimals: 6 })));
     expect(plan.labels).toEqual(["transferChecked"]);
     expect(plan.plan.signers).toEqual([del.toBase58()]);
     const xfer = plan.plan.instructions[0];
     expect(xfer.accounts[0].pubkey).toBe(getAssociatedTokenAddressSync(new PublicKey(mint), owner, true, T22).toBase58());
     expect(xfer.accounts[3]).toMatchObject({ pubkey: del.toBase58(), isSigner: true });
 
-    const sent = JSON.parse(t.text(await t.call("transfer", { walletName: "del", sourceOwner: owner.toBase58(), to, amount: "1", mint, decimals: 6, dryRun: true })));
+    const sent = JSON.parse(t.text(await t.call("transfer", { walletName: "del", sourceOwner: owner.toBase58(), to, amount: "1000000", mint, decimals: 6, dryRun: true })));
     expect(sent.ok).toBe(true);
     expect(sent.preflight.findings.map((f: { code: string }) => f.code)).toContain("DELEGATE_TRANSFER");
-    const over = await t.call("transfer", { walletName: "del", sourceOwner: owner.toBase58(), to, amount: "3", mint, decimals: 6, dryRun: true });
+    const over = await t.call("transfer", { walletName: "del", sourceOwner: owner.toBase58(), to, amount: "3000000", mint, decimals: 6, dryRun: true });
     expect(over.isError).toBe(true);
     expect(JSON.parse(t.text(over)).preflight.findings.map((f: { code: string }) => f.code)).toContain("INSUFFICIENT_DELEGATED_AMOUNT");
     await t.cleanup();
@@ -1151,7 +1190,7 @@ describe("cpi_token_transfer (PRD T-I, task 23)", () => {
       programId,
       destination: Keypair.generate().publicKey.toBase58(),
       mint: t.rpc.mint.toBase58(), // fake RPC reports this mint as SPL Token-owned
-      amount: "1.5",
+      amount: "1500000",
       decimals: 6,
       dryRun: true,
     });
@@ -1187,6 +1226,176 @@ describe("cpi_token_transfer (PRD T-I, task 23)", () => {
     });
     expect(res.isError).toBe(true);
     expect(JSON.parse(t.text(res)).error.code).toBe("INVALID_INPUT");
+    await t.cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Base-unit inputs everywhere + *Display output hints + decimals auto-resolution
+// ---------------------------------------------------------------------------
+
+describe("base-unit inputs, *Display hints and optional decimals", () => {
+  const T22 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+  /** Wallet "w" + a 6-decimal Token-2022 mint (optionally with a transfer fee) and a funded source ATA. */
+  async function seed(t: Awaited<ReturnType<typeof setup>>, o: { mintExt?: TlvEntry[] } = {}) {
+    const owner = new PublicKey(JSON.parse(t.text(await t.call("create_wallet", { name: "w" }))).address);
+    const mint = Keypair.generate().publicKey;
+    const to = Keypair.generate().publicKey;
+    const reg = new Map<string, unknown>();
+    reg.set(mint.toBase58(), token2022MintInfo(mintBase({ decimals: 6 }), o.mintExt ?? []));
+    reg.set(
+      getAssociatedTokenAddressSync(mint, owner, true, T22).toBase58(),
+      token2022AccountInfo(accountBase({ mint, owner, amount: 50_000_000n }), [ext.immutableOwner()]),
+    );
+    reg.set(
+      getAssociatedTokenAddressSync(mint, to, true, T22).toBase58(),
+      token2022AccountInfo(accountBase({ mint, owner: to }), [ext.immutableOwner()]),
+    );
+    t.rpc.fake.getAccountInfo.mockImplementation((addr: PublicKey) => Promise.resolve(reg.get(addr.toBase58()) ?? null));
+    return { owner, mint: mint.toBase58(), to: to.toBase58() };
+  }
+
+  it("request_airdrop takes lamports and echoes lamports + solDisplay; the old `sol` field is refused", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const ok = JSON.parse(t.text(await t.call("request_airdrop", { walletName: "w", lamports: "1500000000" })));
+    expect(ok).toMatchObject({ signature: "SIG_AIRDROP", lamports: "1500000000", solDisplay: "1.5 SOL" });
+    expect(t.rpc.fake.requestAirdrop).toHaveBeenCalledWith(expect.anything(), 1_500_000_000);
+    const legacy = await t.call("request_airdrop", { walletName: "w", sol: "1.5" });
+    expect(legacy.isError).toBe(true);
+    expect(t.text(legacy)).toMatch(/lamports/);
+    const human = await t.call("request_airdrop", { walletName: "w", lamports: "1.5" });
+    expect(human.isError).toBe(true);
+    expect(t.text(human)).toMatch(/base units/);
+    await t.cleanup();
+  });
+
+  it("get_balances returns solLamports + solDisplay and raw token amount + display (no uiAmount)", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const mint = Keypair.generate().publicKey.toBase58();
+    t.rpc.fake.getParsedTokenAccountsByOwner.mockImplementation((_o: unknown, f: { programId: PublicKey }) =>
+      Promise.resolve({
+        value: f.programId.equals(TOKEN_PROGRAM_ID)
+          ? [{ pubkey: Keypair.generate().publicKey, account: { data: { parsed: { info: { mint, tokenAmount: { amount: "2500000", decimals: 6, uiAmount: 2.5 } } } } } }]
+          : [],
+      }),
+    );
+    const body = JSON.parse(t.text(await t.call("get_balances", { walletName: "w" })));
+    expect(body.solLamports).toBe(1_500_000_000);
+    expect(body.solDisplay).toBe("1.5 SOL");
+    expect(body.tokens[0]).toMatchObject({ mint, amount: "2500000", decimals: 6, display: "2.5 (6 dp)", program: "spl-token" });
+    expect(JSON.stringify(body)).not.toContain("uiAmount");
+    await t.cleanup();
+  });
+
+  it("SOL transfer: amount is lamports; output carries amountDisplay / feeDisplay", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const body = JSON.parse(t.text(await t.call("transfer", { walletName: "w", to: Keypair.generate().publicKey.toBase58(), amount: "250000000", dryRun: true })));
+    expect(body).toMatchObject({ ok: true, amountBaseUnits: "250000000", amountDisplay: "0.25 SOL", decimals: null });
+    expect(body.feeDisplay).toMatch(/ SOL$/);
+    await t.cleanup();
+  });
+
+  it("token transfer / preflight / build without decimals → resolved from the mint (one extra read); with decimals → no mint read before preflight", async () => {
+    const t = await setup();
+    const { mint, to } = await seed(t);
+    const build = JSON.parse(t.text(await t.call("build_transfer", { walletName: "w", to, amount: "1500000", mint })));
+    expect(build).toMatchObject({ program: "token-2022", amountBaseUnits: "1500000", amountDisplay: "1.5 (6 dp)", decimals: 6 });
+    // transferChecked carries the resolved decimals byte (ix data: [12, amount u64, decimals u8]).
+    const ix = build.plan.instructions.at(-1);
+    expect(ix.label).toBe("transferChecked");
+    expect(Buffer.from(ix.dataHex, "hex")[9]).toBe(6);
+
+    const pf = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1500000", mint })));
+    expect(pf).toMatchObject({ ok: true, amountBaseUnits: "1500000", amountDisplay: "1.5 (6 dp)", decimals: 6 });
+
+    const sent = JSON.parse(t.text(await t.call("transfer", { walletName: "w", to, amount: "1500000", mint, dryRun: true })));
+    expect(sent).toMatchObject({ ok: true, amountBaseUnits: "1500000", amountDisplay: "1.5 (6 dp)", decimals: 6 });
+
+    // Wrong explicit decimals are honoured as given (transferChecked will fail on chain) — never silently corrected.
+    const wrong = JSON.parse(t.text(await t.call("build_transfer", { walletName: "w", to, amount: "1500000", mint, decimals: 2 })));
+    expect(wrong.decimals).toBe(2);
+    expect(wrong.amountDisplay).toBe("15000 (2 dp)");
+    await t.cleanup();
+  });
+
+  it("preflight TRANSFER_FEE finding carries expectedFeeDisplay / netDisplay next to the raw figures", async () => {
+    const t = await setup();
+    const auth = Keypair.generate().publicKey;
+    const { mint, to } = await seed(t, {
+      mintExt: [
+        ext.transferFeeConfig({
+          configAuthority: auth, withdrawAuthority: auth, withheld: 0n,
+          older: { epoch: 0n, bps: 100, maxFee: 1_000_000n }, newer: { epoch: 0n, bps: 100, maxFee: 1_000_000n },
+        }),
+      ],
+    });
+    const pf = JSON.parse(t.text(await t.call("preflight_transfer", { walletName: "w", to, amount: "1000000", mint })));
+    const fee = pf.findings.find((f: { code: string }) => f.code === "TRANSFER_FEE");
+    expect(fee.data).toMatchObject({
+      amount: "1000000", expectedFee: "10000", net: "990000",
+      amountDisplay: "1 (6 dp)", expectedFeeDisplay: "0.01 (6 dp)", netDisplay: "0.99 (6 dp)",
+    });
+    const sent = JSON.parse(t.text(await t.call("transfer", { walletName: "w", to, amount: "1000000", mint, dryRun: true })));
+    const fee2 = sent.preflight.findings.find((f: { code: string }) => f.code === "TRANSFER_FEE");
+    expect(fee2.data.netDisplay).toBe("0.99 (6 dp)");
+    await t.cleanup();
+  });
+
+  it("approve_delegate: base-unit allowance, decimals optional (resolved), amountDisplay in the result", async () => {
+    const t = await setup();
+    const { mint } = await seed(t);
+    const res = JSON.parse(t.text(await t.call("approve_delegate", { walletName: "w", mint, delegate: Keypair.generate().publicKey.toBase58(), amount: "2000000" })));
+    expect(res).toMatchObject({ ok: true, amountBaseUnits: "2000000", amountDisplay: "2 (6 dp)", decimals: 6 });
+    const human = await t.call("approve_delegate", { walletName: "w", mint, delegate: Keypair.generate().publicKey.toBase58(), amount: "2" , decimals: 6 });
+    expect(JSON.parse(t.text(human)).amountDisplay).toBe("0.000002 (6 dp)"); // "2" means 2 base units now
+    await t.cleanup();
+  });
+
+  it("batch_transfer: recipient amounts are base units; per-recipient amount + amountDisplay, chunk feeDisplay", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const a = Keypair.generate().publicKey.toBase58();
+    const b = Keypair.generate().publicKey.toBase58();
+    const body = JSON.parse(t.text(await t.call("batch_transfer", {
+      walletName: "w",
+      recipients: [{ to: a, amount: "10000000" }, { to: b, amount: "20000000" }],
+      dryRun: true,
+    })));
+    expect(body.mint).toBeNull();
+    expect(body.chunks[0].results).toEqual([
+      expect.objectContaining({ to: a, status: "success", amount: "10000000", amountDisplay: "0.01 SOL" }),
+      expect.objectContaining({ to: b, status: "success", amount: "20000000", amountDisplay: "0.02 SOL" }),
+    ]);
+    // dryRun batches carry no fee; the display hint mirrors that (null) instead of inventing "0 SOL".
+    expect(body.chunks[0].feeDisplay).toBe(body.chunks[0].feeLamports == null ? null : expect.stringMatching(/SOL$/));
+    const bad = await t.call("batch_transfer", { walletName: "w", recipients: [{ to: a, amount: "0.01" }], dryRun: true });
+    expect(bad.isError).toBe(true);
+    expect(t.text(bad)).toMatch(/base units/);
+    await t.cleanup();
+  });
+
+  it("cpi_token_transfer: decimals optional, resolved from the mint", async () => {
+    const t = await setup();
+    const { mint, to } = await seed(t);
+    const body = JSON.parse(t.text(await t.call("cpi_token_transfer", {
+      walletName: "w", programId: Keypair.generate().publicKey.toBase58(), destination: to, mint, amount: "200000", dryRun: true,
+    })));
+    expect(body).toMatchObject({ ok: true, program: "token-2022", amountBaseUnits: "200000", amountDisplay: "0.2 (6 dp)", decimals: 6 });
+    await t.cleanup();
+  });
+
+  it("server instructions and tool descriptions state the base-unit rule", async () => {
+    const t = await setup();
+    const { tools } = await t.client.listTools();
+    for (const name of ["transfer", "batch_transfer", "mixed_transfer", "approve_delegate", "propose_multisig", "cpi_token_transfer", "request_airdrop"]) {
+      const schema = JSON.stringify(tools.find((x) => x.name === name)!.inputSchema);
+      expect(schema, name).toMatch(/BASE UNITS/);
+      expect(schema, name).not.toMatch(/[Hh]uman-readable amount/);
+    }
     await t.cleanup();
   });
 });

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Button, ErrorBanner } from "../../components/ui";
+import { AmountValue } from "../../components/Amount";
+import { useT } from "../../lib/i18n";
 import type { ParsedProgramError, PreflightResult, TransactionPlan } from "../../lib/coreShim";
 import { PlanView, PreflightFindings } from "./PlanPreview";
 
@@ -21,10 +23,11 @@ export function ResultView({
   forcing,
 }: {
   result: SimpleTxOutcome | null;
-  /** When provided and the result is PREFLIGHT_BLOCKED, renders a "强制发送" button. */
+  /** When provided and the result is PREFLIGHT_BLOCKED, renders a "Force send" button. */
   onForce?: () => void;
   forcing?: boolean;
 }) {
+  const t = useT();
   const [showPlan, setShowPlan] = useState(false);
   if (!result) return null;
   const blocked = result.error?.code === "PREFLIGHT_BLOCKED";
@@ -32,7 +35,7 @@ export function ResultView({
   const planToggle = result.plan && (
     <div>
       <button type="button" className="text-xs text-zinc-400 underline-offset-2 hover:underline" onClick={() => setShowPlan((s) => !s)}>
-        {showPlan ? "隐藏交易计划" : "查看交易计划（指令 / message hex）"}
+        {showPlan ? t("result.hidePlan") : t("result.showPlan")}
       </button>
       {showPlan && (
         <div className="mt-2">
@@ -54,11 +57,9 @@ export function ResultView({
         {result.preflight && <PreflightFindings preflight={result.preflight} />}
         {blocked && onForce && (
           <div className="rounded-md border border-amber-800 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
-            <div className="text-xs">
-              强制发送会以 <span className="font-mono">force: true</span> 重新提交，忽略上述 block 级发现，由验证器自行判定；通常会在链上失败并扣除手续费。
-            </div>
+            <div className="text-xs">{t("result.forceHint")}</div>
             <Button variant="danger" className="mt-2" disabled={forcing} onClick={onForce}>
-              {forcing ? "发送中…" : "强制发送"}
+              {forcing ? t("result.forcing") : t("result.force")}
             </Button>
           </div>
         )}
@@ -69,10 +70,14 @@ export function ResultView({
   return (
     <div className="space-y-2">
       <div className="space-y-1 rounded-md border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
-        {result.simulatedOnly && <div className="font-semibold">Simulated only — nothing sent.</div>}
-        {result.signature && <div className="font-mono text-xs break-all">sig: {result.signature}</div>}
-        {result.slot !== undefined && <div>slot: {result.slot}</div>}
-        {result.feeLamports !== undefined && <div>fee: {result.feeLamports} lamports</div>}
+        {result.simulatedOnly && <div className="font-semibold">{t("result.simulated")}</div>}
+        {result.signature && <div className="font-mono text-xs break-all">{t("result.sig", { sig: result.signature })}</div>}
+        {result.slot !== undefined && <div>{t("result.slot", { slot: result.slot })}</div>}
+        {result.feeLamports !== undefined && (
+          <div>
+            {t("result.fee")} <AmountValue raw={result.feeLamports} decimals={9} symbol="SOL" unit={t("common.lamports")} />
+          </div>
+        )}
       </div>
       {result.preflight && result.preflight.findings.length > 0 && <PreflightFindings preflight={result.preflight} />}
       {planToggle}
