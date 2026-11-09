@@ -21,6 +21,7 @@ import {
 } from "../inspect/__fixtures__/accounts.js";
 import type { BuildTransferOptions } from "./build.js";
 import { computeTransferFee, evaluatePreflight, pickFeeTier, preflightTransfer, type PreflightResult } from "./preflight.js";
+import { executeMixedTransfer } from "./mixed.js";
 import { transfer } from "./transfer.js";
 
 const payer = Keypair.generate();
@@ -440,5 +441,41 @@ describe("transfer() preflight gating (T-C)", () => {
     expect(res.preflight?.ok).toBe(true);
     expect(codes(res.preflight!)).toEqual(["DEST_ATA_MISSING"]);
     expect(res.simulatedOnly).toBe(true);
+  });
+});
+
+describe("executeMixedTransfer — per-leg preflight gating", () => {
+  const solTo = Keypair.generate().publicKey;
+  const legs = () => [
+    { kind: "sol" as const, to: solTo, amount: 1_000n },
+    { kind: "token" as const, to: recipient, amount: 1_000n, mint: mintKey, decimals: 6 },
+  ];
+
+  it("a NonTransferable token leg blocks the whole tx before sending; Leg N is named", async () => {
+    const { conn, fake } = fakeConn(registry({ mintExt: [ext.nonTransferable()] }));
+    const r = await executeMixedTransfer(conn, payer, legs());
+    expect(r.error?.code).toBe("PREFLIGHT_BLOCKED");
+    expect(r.preflight?.ok).toBe(false);
+    const f = r.preflight?.findings.find((x) => x.code === "NON_TRANSFERABLE");
+    expect(f).toMatchObject({ severity: "block", data: { leg: 2 } });
+    expect(f?.message).toMatch(/^Leg 2: /);
+    expect(fake.sendRawTransaction).not.toHaveBeenCalled();
+    expect(fake.simulateTransaction).not.toHaveBeenCalled();
+  });
+
+  it("force: true sends anyway and still returns the findings", async () => {
+    const { conn, fake } = fakeConn(registry({ mintExt: [ext.nonTransferable()] }));
+    const r = await executeMixedTransfer(conn, payer, legs(), { force: true });
+    expect(r.error).toBeUndefined();
+    expect(fake.sendRawTransaction).toHaveBeenCalledOnce();
+    expect(r.preflight?.ok).toBe(false);
+  });
+
+  it("clean token leg → sends, preflight ok", async () => {
+    const { conn, fake } = fakeConn(registry({}));
+    const r = await executeMixedTransfer(conn, payer, legs());
+    expect(r.error).toBeUndefined();
+    expect(r.preflight?.ok).toBe(true);
+    expect(fake.sendRawTransaction).toHaveBeenCalledOnce();
   });
 });

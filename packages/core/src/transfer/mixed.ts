@@ -19,6 +19,7 @@ import { SolwalletError } from "../connection/errors.js";
 import { parseTransactionError, type ParsedProgramError } from "../utils/parse-error.js";
 import { estimateTransactionSize, MAX_TX_BYTES } from "./batch.js";
 import { buildTransferInstructions } from "./build.js";
+import { describeBlockers, preflightTransferWithAccounts, type PreflightFinding, type PreflightResult } from "./preflight.js";
 import { dryRun as simulateTx } from "./dryrun.js";
 import type { TokenProgramKind } from "./program.js";
 
@@ -46,6 +47,13 @@ export interface MixedTransferOptions {
   policy?: Partial<ConfirmPolicy>;
   /** Byte budget for the merged tx. Default MAX_TX_BYTES (1232). */
   sizeBudgetBytes?: number;
+  /**
+   * Send even when a token leg's preflight has block-level findings, letting
+   * the validator decide. Findings are still attached to the result.
+   */
+  force?: boolean;
+  /** Skip per-leg preflight entirely (no extra RPC reads, no findings). */
+  skipPreflight?: boolean;
 }
 
 /** Per-leg echo of what was merged into the transaction. */
@@ -76,6 +84,12 @@ export interface MixedTransferResult {
   legs: MixedLegSummary[];
   /** Parsed failure — set instead of throwing, for AI-friendly flows. */
   error?: ParsedProgramError;
+  /**
+   * Merged preflight findings of all token legs (each message is prefixed
+   * with "Leg N"; `data.leg` holds the 1-based leg number). Present whenever
+   * preflight ran.
+   */
+  preflight?: PreflightResult;
 }
 
 /**
@@ -99,8 +113,10 @@ export async function executeMixedTransfer(
 
   const instructions: TransactionInstruction[] = [];
   const summaries: MixedLegSummary[] = [];
+  const findings: PreflightFinding[] = [];
+  let preflightRan = false;
 
-  for (const leg of legs) {
+  for (const [i, leg] of legs.entries()) {
     const to = typeof leg.to === "string" ? new PublicKey(leg.to) : leg.to;
     const mint = leg.mint
       ? typeof leg.mint === "string"
@@ -121,14 +137,26 @@ export async function executeMixedTransfer(
       });
     }
 
-    const built = await buildTransferInstructions(conn, {
+    const buildOpts = {
       payer: from.publicKey,
       destination: to,
       mint,
       amount: leg.amount,
       decimals: leg.decimals,
       allowAtaCreation: leg.allowAtaCreation,
-    });
+    };
+    // Same per-transfer preflight as transfer(): catches NonTransferable,
+    // frozen accounts, MemoTransfer, insufficient balance, … before the
+    // validator rejects the whole merged transaction with a bare custom code.
+    const pre = opts.skipPreflight || !mint ? undefined : await preflightTransferWithAccounts(conn, buildOpts);
+    if (pre) {
+      preflightRan = true;
+      for (const f of pre.result.findings) {
+        findings.push({ ...f, message: `Leg ${i + 1}: ${f.message}`, data: { ...f.data, leg: i + 1 } });
+      }
+    }
+
+    const built = await buildTransferInstructions(conn, buildOpts, pre?.accounts?.preloaded);
     instructions.push(...built.instructions);
     summaries.push({
       kind: built.program?.kind ?? "system",
@@ -139,6 +167,27 @@ export async function executeMixedTransfer(
       destinationAta: built.destinationAta?.toBase58(),
     });
   }
+
+  const preflight: PreflightResult | undefined = preflightRan
+    ? { ok: !findings.some((f) => f.severity === "block"), findings }
+    : undefined;
+  if (preflight && !preflight.ok && opts.force !== true) {
+    return {
+      signature: "",
+      slot: 0,
+      feeLamports: 0,
+      simulatedOnly: opts.dryRun === true,
+      legs: summaries,
+      preflight,
+      error: {
+        code: "PREFLIGHT_BLOCKED",
+        message: `Preflight blocked the mixed transfer: ${describeBlockers(preflight)}`,
+        suggestion:
+          "Fix or remove the blocked leg(s) (see `preflight.findings`), or pass force: true to send anyway and let the validator's preflight decide.",
+      },
+    };
+  }
+  const withPreflight = preflight ? { preflight } : {};
 
   const budget = opts.sizeBudgetBytes ?? MAX_TX_BYTES;
   const estimatedBytes = estimateTransactionSize(from.publicKey, instructions);
@@ -171,6 +220,7 @@ export async function executeMixedTransfer(
       legs: summaries,
       logs: sim.logs,
       unitsConsumed: sim.unitsConsumed,
+      ...withPreflight,
     };
     if (!sim.ok) {
       const simErr = {
@@ -194,6 +244,7 @@ export async function executeMixedTransfer(
       feeLamports: sent.feeLamports,
       simulatedOnly: false,
       legs: summaries,
+      ...withPreflight,
     };
   } catch (error) {
     return {
@@ -202,6 +253,7 @@ export async function executeMixedTransfer(
       feeLamports: 0,
       simulatedOnly: false,
       legs: summaries,
+      ...withPreflight,
       error: parseTransactionError(error),
     };
   }

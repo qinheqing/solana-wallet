@@ -419,7 +419,7 @@ export function registerTransferTools(
     "mixed_transfer",
     {
       description:
-        "One transaction containing multiple legs: native SOL plus any number of different SPL/Token-2022 mints. All legs share one signature. Leg amounts are BASE UNITS (lamports for sol legs, token base units for token legs).",
+        "One transaction containing multiple legs: native SOL plus any number of different SPL/Token-2022 mints. All legs share one signature. Leg amounts are BASE UNITS (lamports for sol legs, token base units for token legs). Every token leg runs preflight_transfer first: any block-level finding (e.g. non-transferable mint, frozen account, memo required, insufficient balance) returns error.code=PREFLIGHT_BLOCKED with `preflight.findings` (messages prefixed \"Leg N\") instead of sending — pass force=true to send anyway.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet paying fees and sending funds."),
         legs: z
@@ -437,10 +437,14 @@ export function registerTransferTools(
           .describe("2–10 legs; mixing kinds encouraged."),
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
+        force: z.boolean().optional().describe(
+          "Bypass block-level preflight findings and let the validator's own preflight decide. Findings are still returned in `preflight`.",
+        ),
         cluster: clusterParam(z, deps),
       },
     },
     run(async (args: SendOptions & {
+      force?: boolean;
       legs: Array<{
         kind: "sol" | "token";
         to: string;
@@ -491,6 +495,7 @@ export function registerTransferTools(
       const result = await executeMixedTransfer(conn, from, legs, {
         dryRun: args.dryRun,
         allowMainnet: args.allowMainnet,
+        force: args.force,
       });
       return {
         ok: result.error === undefined,
@@ -502,6 +507,7 @@ export function registerTransferTools(
         logs: result.logs,
         unitsConsumed: result.unitsConsumed,
         ...(result.error ? { error: result.error } : {}),
+        ...(result.preflight ? { preflight: result.preflight } : {}),
         legs: result.legs.map((l, i) => ({
           kind: l.kind,
           to: l.to,

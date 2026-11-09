@@ -37,7 +37,7 @@ export function MixedTransfer() {
   const update = (i: number, patch: Partial<LegDraft>) =>
     setLegs((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
-  const send = async () => {
+  const send = async (force = false) => {
     setFormError(null);
     setResult(null);
     if (!keypair) {
@@ -64,6 +64,7 @@ export function MixedTransfer() {
       const res = await executeMixedTransfer(connection, keypair, built, {
         dryRun,
         allowMainnet: isMainnet ? mainnetAck : undefined,
+        force,
       });
       setResult(res);
     } catch (e) {
@@ -158,10 +159,10 @@ export function MixedTransfer() {
         </label>
       )}
       {formError && <div className="text-sm text-red-400">{formError}</div>}
-      <Button variant="primary" disabled={busy || !keypair} onClick={send}>
+      <Button variant="primary" disabled={busy || !keypair} onClick={() => send()}>
         {busy ? t("common.sending") : dryRun ? t("common.simulate") : t("common.send")}
       </Button>
-      <ResultView result={result} />
+      <ResultView result={result} onForce={() => send(true)} forcing={busy} />
     </Card>
   );
 }
