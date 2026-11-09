@@ -120,7 +120,7 @@ export function MultisigDetailModal({
 
   const executeAs = async (p: MultisigProposalSummary, s: MemberSigner) => {
     if (!s.keypair) return;
-    setBusy(`execute-${p.transactionIndex}`);
+    setBusy(`execute-${p.transactionIndex}-${s.wallet.id}`);
     setActionMsg(null);
     try {
       const res = await executeMultisigProposal(connection, s.keypair, new PublicKey(saved.address), BigInt(p.transactionIndex), opts);
@@ -242,7 +242,7 @@ export function MultisigDetailModal({
               {[...(proposals?.proposals ?? [])].reverse().map((p) => {
                 const open = p.status === "active" || p.status === "approved";
                 const need = Math.max(threshold - p.approvedBy.length, 0);
-                const executor = signers.find((s) => s.keypair);
+                const executors = signers.filter((s) => s.keypair);
                 return (
                   <li key={p.transactionIndex} className="space-y-3 rounded-md border border-zinc-800 p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -313,12 +313,27 @@ export function MultisigDetailModal({
                         )}
                         {p.executeReady && (
                           <div className="flex flex-wrap items-center gap-2">
-                            {executor ? (
-                              <Button variant="primary" disabled={busy !== null} onClick={() => executeAs(p, executor)}>
-                                {busy === `execute-${p.transactionIndex}`
-                                  ? t("common.sending")
-                                  : t("msx.executeAs", { name: executor.wallet.name })}
-                              </Button>
+                            {executors.length > 0 ? (
+                              <>
+                                {executors.map((s) => (
+                                  <Button
+                                    key={s.wallet.id}
+                                    variant="primary"
+                                    className="px-2.5 py-1 text-xs"
+                                    disabled={busy !== null}
+                                    onClick={() => executeAs(p, s)}
+                                  >
+                                    {busy === `execute-${p.transactionIndex}-${s.wallet.id}`
+                                      ? t("common.sending")
+                                      : t("msx.executeAs", { name: s.wallet.name })}
+                                  </Button>
+                                ))}
+                                {signers
+                                  .filter((s) => !s.keypair)
+                                  .map((s) => (
+                                    <UnlockButton key={s.wallet.id} wallet={s.wallet} />
+                                  ))}
+                              </>
                             ) : (
                               <>
                                 <span className="text-amber-300">{t("msx.unlockToExecute")}</span>
