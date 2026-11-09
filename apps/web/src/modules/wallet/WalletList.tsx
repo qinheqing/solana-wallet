@@ -9,7 +9,8 @@ import type { StoredWalletRecord } from "../../lib/types";
 
 export function WalletList() {
   const t = useT();
-  const { state, currentWallet, unlockWallet, removeWallet } = useApp();
+  const { state, currentWallet, unlockWallet, removeWallet, selectWallet, lockWallet, lockAll, isUnlocked } = useApp();
+  const anyUnlocked = state.wallets.some((w) => isUnlocked(w.id));
   const [deleteTarget, setDeleteTarget] = useState<StoredWalletRecord | null>(null);
   const [exportTarget, setExportTarget] = useState<StoredWalletRecord | null>(null);
   const [unlockTarget, setUnlockTarget] = useState<StoredWalletRecord | null>(null);
@@ -26,6 +27,12 @@ export function WalletList() {
   };
 
   const doSwitch = async (w: StoredWalletRecord) => {
+    if (isUnlocked(w.id)) {
+      selectWallet(w.id);
+      setUnlockTarget(null);
+      setError(null);
+      return;
+    }
     if (w.encrypted) {
       setUnlockTarget(w);
       setPassword("");
@@ -72,7 +79,14 @@ export function WalletList() {
 
   return (
     <Card className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-300">{t("wallet.list.title", { n: state.wallets.length })}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-zinc-300">{t("wallet.list.title", { n: state.wallets.length })}</h3>
+        {anyUnlocked && (
+          <Button variant="ghost" onClick={lockAll}>
+            {t("wallet.lockAll")}
+          </Button>
+        )}
+      </div>
       {state.wallets.length === 0 && <div className="text-sm text-zinc-500">{t("wallet.list.empty")}</div>}
       <ul className="space-y-2">
         {state.wallets.map((w) => (
@@ -85,7 +99,15 @@ export function WalletList() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="truncate text-sm text-zinc-100">{w.name}</span>
-                {w.encrypted ? <Badge tone="success">{t("common.encrypted")}</Badge> : <Badge tone="warn">{t("common.plaintext")}</Badge>}
+                {w.encrypted ? (
+                  isUnlocked(w.id) ? (
+                    <Badge tone="success">{t("wallet.status.unlocked")}</Badge>
+                  ) : (
+                    <Badge>{t("wallet.status.locked")}</Badge>
+                  )
+                ) : (
+                  <Badge tone="warn">{t("common.plaintext")}</Badge>
+                )}
                 {currentWallet?.id === w.id && <Badge>{t("common.active")}</Badge>}
               </div>
               <div className="truncate font-mono text-xs text-zinc-500">{w.address}</div>
@@ -97,6 +119,11 @@ export function WalletList() {
               <Button variant="default" onClick={() => doSwitch(w)}>
                 {t("wallet.select")}
               </Button>
+              {isUnlocked(w.id) && (
+                <Button variant="ghost" onClick={() => lockWallet(w.id)}>
+                  {t("wallet.lock")}
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => startExport(w)}>
                 {t("wallet.export")}
               </Button>

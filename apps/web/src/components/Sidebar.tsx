@@ -27,7 +27,8 @@ const NAV: { to: string; label: TKey; end?: boolean }[] = [
 
 export function Sidebar() {
   const t = useT();
-  const { state, connection, currentWallet, setCluster, setCustomRpc, setMainnetAck } = useApp();
+  const { state, connection, currentWallet, setCluster, setCustomRpc, setMainnetAck, lock } = useApp();
+  const currentUnlocked = state.unlockedKeypair !== null;
   const [lamports, setLamports] = useState<number | null>(null);
 
   useEffect(() => {
@@ -108,7 +109,22 @@ export function Sidebar() {
             <div className="text-sm text-emerald-400">
               {lamports === null ? "…" : <AmountValue raw={lamports} decimals={9} symbol="SOL" unit={t("common.lamports")} stacked />}
             </div>
-            {currentWallet.encrypted && <Badge tone="success">{t("common.encrypted")}</Badge>}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {currentWallet.encrypted ? (
+                currentUnlocked ? (
+                  <Badge tone="success">{t("wallet.status.unlocked")}</Badge>
+                ) : (
+                  <Badge>{t("wallet.status.locked")}</Badge>
+                )
+              ) : (
+                <Badge tone="warn">{t("common.plaintext")}</Badge>
+              )}
+              {currentUnlocked && (
+                <Button variant="ghost" onClick={lock}>
+                  {t("wallet.lock")}
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="text-sm text-zinc-500">{t("sidebar.noWallet")}</div>

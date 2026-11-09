@@ -25,9 +25,18 @@ interface State {
   cluster: ClusterName;
   customRpcUrl: string;
   currentWalletId: string | null;
-  /** In-memory only — never persisted. */
+  /** In-memory only — never persisted. Keyed by wallet id. */
+  unlocked: Record<string, Keypair>;
+  /** Derived: unlocked[currentWalletId] ?? null. */
   unlockedKeypair: Keypair | null;
   mainnetAck: boolean;
+}
+
+function withDerived(state: Omit<State, "unlockedKeypair">): State {
+  return {
+    ...state,
+    unlockedKeypair: (state.currentWalletId && state.unlocked[state.currentWalletId]) || null,
+  };
 }
 
 type Action =
@@ -35,7 +44,9 @@ type Action =
   | { type: "SET_CLUSTER"; cluster: ClusterName }
   | { type: "SET_CUSTOM_RPC"; url: string }
   | { type: "SET_CURRENT"; id: string | null }
-  | { type: "UNLOCK"; keypair: Keypair | null }
+  | { type: "UNLOCK"; id: string; keypair: Keypair }
+  | { type: "LOCK"; id: string }
+  | { type: "LOCK_ALL" }
   | { type: "SET_MAINNET_ACK"; ack: boolean };
 
 function reducer(state: State, action: Action): State {
@@ -47,9 +58,17 @@ function reducer(state: State, action: Action): State {
     case "SET_CUSTOM_RPC":
       return { ...state, customRpcUrl: action.url };
     case "SET_CURRENT":
-      return { ...state, currentWalletId: action.id, unlockedKeypair: null };
+      return withDerived({ ...state, currentWalletId: action.id });
     case "UNLOCK":
-      return { ...state, unlockedKeypair: action.keypair };
+      return withDerived({ ...state, unlocked: { ...state.unlocked, [action.id]: action.keypair } });
+    case "LOCK": {
+      if (!(action.id in state.unlocked)) return state;
+      const rest = { ...state.unlocked };
+      delete rest[action.id];
+      return withDerived({ ...state, unlocked: rest });
+    }
+    case "LOCK_ALL":
+      return withDerived({ ...state, unlocked: {} });
     case "SET_MAINNET_ACK":
       return { ...state, mainnetAck: action.ack };
     default:
@@ -64,6 +83,7 @@ function init(): State {
     cluster: settings.cluster,
     customRpcUrl: settings.customRpcUrl,
     currentWalletId: settings.currentWalletId,
+    unlocked: {},
     unlockedKeypair: null,
     mainnetAck: false,
   };
@@ -81,7 +101,11 @@ export interface AppApi {
   selectWallet: (id: string | null) => void;
   /** Decrypt (if needed) and load the keypair for the given wallet into memory. */
   unlockWallet: (id: string, password?: string) => Promise<Keypair>;
+  /** Lock the current wallet (drop its keypair from memory). */
   lock: () => void;
+  lockWallet: (id: string) => void;
+  lockAll: () => void;
+  isUnlocked: (id: string) => boolean;
 }
 
 const AppCtx = createContext<AppApi | null>(null);
@@ -153,7 +177,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: "SET_WALLETS", wallets: [...state.wallets, record] });
       dispatch({ type: "SET_CURRENT", id: record.id });
-      dispatch({ type: "UNLOCK", keypair });
+      dispatch({ type: "UNLOCK", id: record.id, keypair });
     },
     [state.wallets],
   );
@@ -161,6 +185,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const removeWallet = useCallback(
     (id: string) => {
       dispatch({ type: "SET_WALLETS", wallets: state.wallets.filter((w) => w.id !== id) });
+      dispatch({ type: "LOCK", id });
       if (state.currentWalletId === id) {
         dispatch({ type: "SET_CURRENT", id: null });
       }
@@ -188,13 +213,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         keypair = parseKeypairJson(record.payload as KeypairBytes);
       }
       dispatch({ type: "SET_CURRENT", id });
-      dispatch({ type: "UNLOCK", keypair });
+      dispatch({ type: "UNLOCK", id, keypair });
       return keypair;
     },
     [state.wallets],
   );
 
-  const lock = useCallback(() => dispatch({ type: "UNLOCK", keypair: null }), []);
+  const lockWallet = useCallback((id: string) => dispatch({ type: "LOCK", id }), []);
+  const lockAll = useCallback(() => dispatch({ type: "LOCK_ALL" }), []);
+  const lock = useCallback(() => {
+    if (state.currentWalletId) dispatch({ type: "LOCK", id: state.currentWalletId });
+  }, [state.currentWalletId]);
+  const isUnlocked = useCallback((id: string) => id in state.unlocked, [state.unlocked]);
 
   const api: AppApi = {
     state,
@@ -208,6 +238,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     selectWallet,
     unlockWallet,
     lock,
+    lockWallet,
+    lockAll,
+    isUnlocked,
   };
 
   return <AppCtx.Provider value={api}>{children}</AppCtx.Provider>;
