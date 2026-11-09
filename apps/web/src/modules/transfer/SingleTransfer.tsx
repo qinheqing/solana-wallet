@@ -17,6 +17,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ResultView } from "./ResultView";
 import { AdvancedOptions, DEFAULT_ADVANCED, toKnobs, type AdvancedState } from "./AdvancedOptions";
 import { PlanView, PreflightFindings } from "./PlanPreview";
+import { MintPicker, useOwnedTokens } from "./MintPicker";
 
 interface Preview {
   plan: TransactionPlan | null;
@@ -37,6 +38,7 @@ export function SingleTransfer() {
   const [dryRun, setDryRun] = useState(true);
   const [mainnetAck, setMainnetAck] = useState(false);
   const [advanced, setAdvanced] = useState<AdvancedState>(DEFAULT_ADVANCED);
+  const owned = useOwnedTokens();
   const [busy, setBusy] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -140,12 +142,12 @@ export function SingleTransfer() {
     <Card className="space-y-3">
       <div>
         <Label htmlFor="singletransfer-destination-address">{t("transfer.destination")}</Label>
-        <Input id="singletransfer-destination-address" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder={t("transfer.destinationPlaceholder")} />
+        <Input className="font-mono" id="singletransfer-destination-address" value={destination} onChange={(e) => setDestination(e.target.value)} placeholder={t("transfer.destinationPlaceholder")} />
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <Label htmlFor="singletransfer-mint">{t("transfer.mint")}</Label>
-          <Input id="singletransfer-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder={t("transfer.mintPlaceholder")} />
+          <MintPicker id="singletransfer-mint" value={mint} onChange={setMint} onDecimals={(d) => setDecimals(String(d))} owned={owned} placeholder={t("transfer.mintPlaceholder")} />
         </div>
         <div>
           <Label htmlFor="singletransfer-decimals">{t("transfer.decimals")}</Label>

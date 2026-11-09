@@ -5,6 +5,7 @@ import { useT } from "../../lib/i18n";
 import { Button, Card, Input, Label } from "../../components/ui";
 import { AmountHint, parseBaseUnits, parseDecimals } from "../../components/Amount";
 import { ResultView } from "./ResultView";
+import { MintPicker, useOwnedTokens } from "./MintPicker";
 
 interface LegDraft {
   kind: "sol" | "token";
@@ -28,6 +29,7 @@ export function MixedTransfer() {
   const [legs, setLegs] = useState<LegDraft[]>([emptyLeg()]);
   const [dryRun, setDryRun] = useState(true);
   const [mainnetAck, setMainnetAck] = useState(false);
+  const owned = useOwnedTokens();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<MixedTransferResult | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export function MixedTransfer() {
                 <option value="token">{t("mixed.token")}</option>
               </select>
               <Input
-                className="col-span-2 sm:col-span-4"
+                className="font-mono col-span-2 sm:col-span-4"
                 aria-label={t("mixed.legDestination", { n: i + 1 })}
                 placeholder={t("mixed.destination")}
                 value={leg.to}
@@ -96,13 +98,16 @@ export function MixedTransfer() {
               />
               {leg.kind === "token" && (
                 <>
-                  <Input
-                    className="col-span-2 sm:col-span-3"
-                    aria-label={t("mixed.legMint", { n: i + 1 })}
-                    placeholder={t("mixed.mint")}
-                    value={leg.mint}
-                    onChange={(e) => update(i, { mint: e.target.value })}
-                  />
+                  <div className="col-span-2 sm:col-span-3">
+                    <MintPicker
+                      ariaLabel={t("mixed.legMint", { n: i + 1 })}
+                      placeholder={t("mixed.mint")}
+                      value={leg.mint}
+                      onChange={(mint) => update(i, { mint })}
+                      onDecimals={(d) => update(i, { decimals: String(d) })}
+                      owned={owned}
+                    />
+                  </div>
                   <Input
                     className="col-span-2 sm:col-span-1"
                     inputMode="numeric"

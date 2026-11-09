@@ -100,7 +100,11 @@ export interface AppApi {
   removeWallet: (id: string) => void;
   selectWallet: (id: string | null) => void;
   /** Decrypt (if needed) and load the keypair for the given wallet into memory. */
-  unlockWallet: (id: string, password?: string) => Promise<Keypair>;
+  /**
+   * Decrypt (if needed) and load the keypair for the given wallet into memory.
+   * Also selects it as the current wallet unless `opts.select === false`.
+   */
+  unlockWallet: (id: string, password?: string, opts?: { select?: boolean }) => Promise<Keypair>;
   /** Lock the current wallet (drop its keypair from memory). */
   lock: () => void;
   lockWallet: (id: string) => void;
@@ -198,7 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const unlockWallet = useCallback(
-    async (id: string, password?: string): Promise<Keypair> => {
+    async (id: string, password?: string, opts?: { select?: boolean }): Promise<Keypair> => {
       const record = state.wallets.find((w) => w.id === id);
       if (!record) throw new Error("Wallet not found");
       let keypair: Keypair;
@@ -212,7 +216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else {
         keypair = parseKeypairJson(record.payload as KeypairBytes);
       }
-      dispatch({ type: "SET_CURRENT", id });
+      if (opts?.select !== false) dispatch({ type: "SET_CURRENT", id });
       dispatch({ type: "UNLOCK", id, keypair });
       return keypair;
     },

@@ -13,7 +13,7 @@ export function Button({
   className = "",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "primary" | "danger" | "ghost" }) {
-  const base = "rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed";
+  const base = "whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed";
   const styles: Record<string, string> = {
     default: "bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
     primary: "bg-emerald-600 text-white hover:bg-emerald-500",
@@ -27,7 +27,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-600 focus:outline-none ${props.className ?? ""}`}
+      className={`w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 placeholder:font-sans focus:border-emerald-600 focus:outline-none ${props.className ?? ""}`}
     />
   );
 }
@@ -36,14 +36,14 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
       {...props}
-      className={`w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-600 focus:outline-none ${props.className ?? ""}`}
+      className={`w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 placeholder:font-sans focus:border-emerald-600 focus:outline-none ${props.className ?? ""}`}
     />
   );
 }
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+    <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium text-zinc-400">
       {children}
     </label>
   );

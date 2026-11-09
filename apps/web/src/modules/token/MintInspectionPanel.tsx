@@ -4,24 +4,18 @@ import { useApp } from "../../lib/AppContext";
 import { useT } from "../../lib/i18n";
 import { Badge, ErrorBanner } from "../../components/ui";
 import { AmountValue } from "../../components/Amount";
-import { CopyButton, shortKey } from "../../components/CopyButton";
+import { Address } from "../../components/CopyButton";
 
 function Key({ value }: { value: string | null }) {
   const t = useT();
-  if (!value) return <span className="text-zinc-500">{t("mint.null")}</span>;
-  return (
-    <span className="inline-flex items-center gap-1 font-mono" title={value}>
-      {shortKey(value, 6)}
-      <CopyButton text={value} label="⧉" className="px-1" />
-    </span>
-  );
+  return <Address value={value} empty={t("mint.null")} className="text-zinc-200" />;
 }
 
 function Row({ k, children }: { k: string; children: React.ReactNode }) {
   return (
     <>
       <dt className="text-zinc-500">{k}</dt>
-      <dd className="min-w-0 break-all text-zinc-200">{children}</dd>
+      <dd className="min-w-0 break-words text-zinc-200">{children}</dd>
     </>
   );
 }
@@ -32,7 +26,7 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
   switch (ext.type) {
     case "TransferFeeConfig":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
           <Row k={t("mint.configAuthority")}>
             <Key value={ext.transferFeeConfigAuthority} />
           </Row>
@@ -54,15 +48,15 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "PermanentDelegate":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          <Row k="delegate">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
+          <Row k={t("mint.k.delegate")}>
             <Key value={ext.delegate} />
           </Row>
         </dl>
       );
     case "TransferHook":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
           <Row k={t("mint.hookProgram")}>
             <Key value={ext.programId} />
           </Row>
@@ -73,9 +67,9 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "ScaledUiAmount":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          <Row k="multiplier">{ext.multiplier}</Row>
-          <Row k="newMultiplier">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
+          <Row k={t("mint.k.multiplier")}>{ext.multiplier}</Row>
+          <Row k={t("mint.k.newMultiplier")}>
             {ext.newMultiplier} · {t("mint.effectiveTs")} {ext.newMultiplierEffectiveTimestamp}
           </Row>
           <Row k={t("mint.authority")}>
@@ -85,7 +79,7 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "MetadataPointer":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
           <Row k={t("mint.metadataAddress")}>
             <Key value={ext.metadataAddress} />
           </Row>
@@ -96,10 +90,10 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "TokenMetadata":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          <Row k="name">{ext.name}</Row>
-          <Row k="symbol">{ext.symbol}</Row>
-          <Row k="uri">{ext.uri || "—"}</Row>
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
+          <Row k={t("mint.k.name")}>{ext.name}</Row>
+          <Row k={t("mint.k.symbol")}>{ext.symbol}</Row>
+          <Row k={t("mint.k.uri")}>{ext.uri || "—"}</Row>
           <Row k={t("mint.updateAuthority")}>
             <Key value={ext.updateAuthority} />
           </Row>
@@ -112,7 +106,7 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "InterestBearingConfig":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
           <Row k={t("mint.currentRate")}>{t("mint.bpsPerYear", { n: ext.currentRate })}</Row>
           <Row k={t("mint.preUpdateAvg")}>{t("mint.bpsPerYear", { n: ext.preUpdateAverageRate })}</Row>
           <Row k={t("mint.initLast")}>
@@ -131,15 +125,15 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "MintCloseAuthority":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          <Row k="closeAuthority">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
+          <Row k={t("mint.k.closeAuthority")}>
             <Key value={ext.closeAuthority} />
           </Row>
         </dl>
       );
     case "GroupPointer":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
           <Row k={t("mint.groupAddress")}>
             <Key value={ext.groupAddress} />
           </Row>
@@ -150,7 +144,7 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "GroupMemberPointer":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
           <Row k={t("mint.memberAddress")}>
             <Key value={ext.memberAddress} />
           </Row>
@@ -161,8 +155,8 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
       );
     case "Pausable":
       return (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          <Row k="paused">
+        <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
+          <Row k={t("mint.k.paused")}>
             <Badge tone={ext.paused ? "danger" : "success"}>{String(ext.paused)}</Badge>
           </Row>
           <Row k={t("mint.authority")}>
@@ -180,7 +174,7 @@ function ExtensionBody({ ext, decimals }: { ext: MintExtension; decimals: number
 
 const RISKY: ReadonlySet<MintExtension["type"]> = new Set(["TransferHook", "PermanentDelegate", "NonTransferable", "Pausable", "DefaultAccountState"]);
 
-export function MintInspectionPanel({ mint }: { mint: string }) {
+export function MintInspectionPanel({ mint, refreshKey = 0 }: { mint: string; refreshKey?: number }) {
   const t = useT();
   const { connection } = useApp();
   const [data, setData] = useState<MintInspection | null>(null);
@@ -207,10 +201,10 @@ export function MintInspectionPanel({ mint }: { mint: string }) {
     return () => {
       cancelled = true;
     };
-  }, [connection, mint]);
+  }, [connection, mint, refreshKey]);
 
   return (
-    <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs">
+    <div className="space-y-3 rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-5">
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold text-zinc-300">{t("mint.title")}</h4>
         {loading && <span className="text-zinc-500">{t("mint.loading")}</span>}
@@ -218,19 +212,19 @@ export function MintInspectionPanel({ mint }: { mint: string }) {
       {error && <ErrorBanner>{error}</ErrorBanner>}
       {data && (
         <>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-            <Row k="program">
+          <dl className="grid grid-cols-[7rem_1fr] items-baseline gap-x-4 gap-y-2 leading-5 sm:grid-cols-[9rem_1fr]">
+            <Row k={t("mint.k.program")}>
               <Badge tone={data.program === "token-2022" ? "success" : "default"}>{data.program}</Badge>{" "}
-              <span className="font-mono text-zinc-500">{shortKey(data.programId, 6)}</span>
+              <Address value={data.programId} className="text-zinc-500" />
             </Row>
-            <Row k="decimals">{data.decimals}</Row>
-            <Row k="supply">
+            <Row k={t("mint.k.decimals")}>{data.decimals}</Row>
+            <Row k={t("mint.k.supply")}>
               <AmountValue raw={data.supply} decimals={data.decimals} />
             </Row>
-            <Row k="mintAuthority">
+            <Row k={t("mint.k.mintAuthority")}>
               <Key value={data.mintAuthority} />
             </Row>
-            <Row k="freezeAuthority">
+            <Row k={t("mint.k.freezeAuthority")}>
               <Key value={data.freezeAuthority} />
             </Row>
             <Row k={t("mint.accountLen")}>{t("common.bytes", { n: data.accountLen })}</Row>
@@ -241,10 +235,10 @@ export function MintInspectionPanel({ mint }: { mint: string }) {
             {data.extensions.length === 0 ? (
               <div className="text-zinc-500">{t("mint.noExtensions")}</div>
             ) : (
-              <ul className="space-y-1.5">
+              <ul className="space-y-2">
                 {data.extensions.map((ext, i) => (
-                  <li key={`${ext.type}-${i}`} className="rounded border border-zinc-800 p-2">
-                    <div className="mb-1 flex items-center gap-2">
+                  <li key={`${ext.type}-${i}`} className="rounded border border-zinc-800 p-3">
+                    <div className="mb-2 flex items-center gap-2">
                       <span className="font-semibold text-zinc-100">{ext.type}</span>
                       {RISKY.has(ext.type) && <Badge tone="warn">{t("mint.affectsTransfer")}</Badge>}
                     </div>

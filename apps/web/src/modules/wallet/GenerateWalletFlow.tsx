@@ -137,7 +137,7 @@ export function GenerateWalletFlow({ onDone }: { onDone: () => void }) {
       {/* 2. Key source */}
       <section className="space-y-3 border-t border-zinc-800 pt-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">{t("wallet.gen.keySource")}</span>
+          <span className="text-xs font-medium text-zinc-400">{t("wallet.gen.keySource")}</span>
           <Button variant={source === "mnemonic" ? "primary" : "default"} onClick={() => chooseSource("mnemonic")}>
             {t("wallet.gen.mnemonic")}
           </Button>

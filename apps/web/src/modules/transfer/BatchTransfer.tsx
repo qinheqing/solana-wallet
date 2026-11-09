@@ -10,6 +10,7 @@ import { useApp } from "../../lib/AppContext";
 import { useT } from "../../lib/i18n";
 import { Badge, Button, Card, Input, Label, Textarea } from "../../components/ui";
 import { amountHintText, isBaseUnits, parseDecimals } from "../../components/Amount";
+import { MintPicker, useOwnedTokens } from "./MintPicker";
 
 interface ParsedLine {
   raw: string;
@@ -44,6 +45,7 @@ export function BatchTransfer() {
   const [decimals, setDecimals] = useState("9");
   const [dryRun, setDryRun] = useState(true);
   const [mainnetAck, setMainnetAck] = useState(false);
+  const owned = useOwnedTokens();
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BatchResult[] | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -128,7 +130,7 @@ export function BatchTransfer() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <Label htmlFor="batchtransfer-mint">{t("transfer.mint")}</Label>
-          <Input id="batchtransfer-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder={t("transfer.mintPlaceholder")} />
+          <MintPicker id="batchtransfer-mint" value={mint} onChange={setMint} onDecimals={(d) => setDecimals(String(d))} owned={owned} placeholder={t("transfer.mintPlaceholder")} />
         </div>
         <div>
           <Label htmlFor="batchtransfer-decimals">{t("transfer.decimals")}</Label>

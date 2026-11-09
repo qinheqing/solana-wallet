@@ -26,6 +26,20 @@ export {
   harvestWithheldToMint,
   withdrawWithheldFromMint,
   updateTransferHookProgram,
+  pauseMint,
+  resumeMint,
+  closeMint,
+  updateInterestRate,
+  updateDefaultAccountState,
+  setExtensionAuthority,
+  findWithheldAccounts,
+  EXTENSION_AUTHORITY_TYPES,
+  type ExtensionAuthorityKind,
+  type MintAuthorityParams,
+  type CloseMintParams,
+  type UpdateInterestRateParams,
+  type UpdateDefaultAccountStateParams,
+  type WithheldAccount,
   type TokenManageResult,
   type TransferFeeUpdate,
   type UpdateScaledUiMultiplierParams,
@@ -35,6 +49,18 @@ export {
   type WithdrawWithheldFromMintParams,
   type UpdateTransferHookProgramParams,
 } from "./manage.js";
+
+export {
+  METAPLEX_TOKEN_METADATA_PROGRAM_ID,
+  METAPLEX_MAX_NAME_LEN,
+  METAPLEX_MAX_SYMBOL_LEN,
+  METAPLEX_MAX_URI_LEN,
+  metaplexMetadataPda,
+  createMetaplexMetadataInstruction,
+  decodeMetaplexMetadata,
+  validateTokenMetadata,
+  type TokenMetadataInput,
+} from "./metaplex.js";
 
 // --- PRD T-F: token presets -----------------------------------------------
 export {

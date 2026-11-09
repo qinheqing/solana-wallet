@@ -5,7 +5,11 @@ import {
   createToken2022,
   mintTokens,
   parseTransactionError,
+  validateTokenMetadata,
+  METAPLEX_MAX_NAME_LEN,
+  METAPLEX_MAX_SYMBOL_LEN,
   type CreateTokenResult,
+  type TokenMetadataInput,
   type TokenPresetName,
 } from "../../lib/coreShim";
 import { useApp } from "../../lib/AppContext";
@@ -60,6 +64,10 @@ export function TokenCreatePage() {
   const [preset, setPreset] = useState<TokenPresetName | "">("");
   const [presetNotes, setPresetNotes] = useState<string[]>([]);
   const [decimals, setDecimals] = useState("9");
+  // Name / symbol / uri — Metaplex metadata (SPL) or the TokenMetadata extension (Token-2022).
+  const [metaName, setMetaName] = useState("");
+  const [metaSymbol, setMetaSymbol] = useState("");
+  const [metaUri, setMetaUri] = useState("");
   /** Raw base units; "0" or empty = no initial mint. */
   const [initialSupply, setInitialSupply] = useState("0");
   const [extForm, setExtForm] = useState<ExtensionFormState>(makeDefaultExtensionFormState());
@@ -70,7 +78,17 @@ export function TokenCreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  const { extensions, summary } = kind === "token2022" ? buildToken2022Extensions(extForm, t) : { extensions: undefined, summary: [] };
+  const metadata: (TokenMetadataInput & { uri: string }) | undefined =
+    metaName.trim() || metaSymbol.trim() || metaUri.trim()
+      ? { name: metaName.trim(), symbol: metaSymbol.trim(), uri: metaUri.trim() }
+      : undefined;
+  const built = kind === "token2022" ? buildToken2022Extensions(extForm, t) : { extensions: undefined, summary: [] as string[] };
+  const extensions =
+    kind === "token2022" && metadata ? { ...(built.extensions ?? {}), tokenMetadata: metadata } : built.extensions;
+  const summary =
+    kind === "token2022" && metadata
+      ? [...built.summary, t("ext.sum.metadata", { name: metadata.name, symbol: metadata.symbol })]
+      : built.summary;
 
   const applyPreset = (name: TokenPresetName | "") => {
     setPreset(name);
@@ -98,6 +116,17 @@ export function TokenCreatePage() {
       setError(t("adv.err.nonNegInt", { field: "decimals" }));
       return;
     }
+    if (metadata) {
+      try {
+        validateTokenMetadata(
+          metadata,
+          kind === "spl" ? undefined : { name: 1024, symbol: 1024, uri: 4096 },
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
+    }
     const supplyRaw = initialSupply.trim();
     const wantsSupply = supplyRaw.length > 0 && supplyRaw !== "0";
     if (wantsSupply && !isBaseUnits(supplyRaw)) {
@@ -112,7 +141,7 @@ export function TokenCreatePage() {
       };
       const result =
         kind === "spl"
-          ? await createSplToken(connection, keypair, opts)
+          ? await createSplToken(connection, keypair, { ...opts, metadata })
           : await createToken2022(connection, keypair, { ...opts, extensions });
 
       // core reports failures via result.error instead of throwing; the
@@ -190,6 +219,28 @@ export function TokenCreatePage() {
         <Button variant={kind === "token2022" ? "primary" : "default"} onClick={() => setKind("token2022")}>
           {t("token.create.t22")}
         </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div>
+          <Label htmlFor="tokencreatepage-name">{t("token.create.name")}</Label>
+          <Input id="tokencreatepage-name" value={metaName} onChange={(e) => setMetaName(e.target.value)} placeholder="My Token" />
+        </div>
+        <div>
+          <Label htmlFor="tokencreatepage-symbol">{t("token.create.symbol")}</Label>
+          <Input id="tokencreatepage-symbol" value={metaSymbol} onChange={(e) => setMetaSymbol(e.target.value)} placeholder="MYT" />
+        </div>
+        <div>
+          <Label htmlFor="tokencreatepage-uri">{t("token.create.uri")}</Label>
+          <Input id="tokencreatepage-uri" value={metaUri} onChange={(e) => setMetaUri(e.target.value)} placeholder="https://…/token.json" />
+        </div>
+      </div>
+      <div className="-mt-1 text-xs text-zinc-500">
+        {kind === "spl"
+          ? t("token.create.metaHintSpl", { name: METAPLEX_MAX_NAME_LEN, symbol: METAPLEX_MAX_SYMBOL_LEN })
+          : t("token.create.metaHintT22")}
+        {kind === "spl" && metadata && state.cluster === "localnet" && (
+          <div className="text-amber-300">{t("token.create.metaLocalnet")}</div>
+        )}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>

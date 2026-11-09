@@ -6,6 +6,7 @@ import { useT, type TKey } from "../lib/i18n";
 import { Badge, Button, Input } from "./ui";
 import { AmountValue } from "./Amount";
 import { LocaleToggle } from "./LocaleToggle";
+import { CopyButton } from "./CopyButton";
 import type { ClusterName } from "../lib/types";
 
 const CLUSTERS: { value: ClusterName; label?: TKey }[] = [
@@ -60,7 +61,7 @@ export function Sidebar() {
       </div>
 
       <div>
-        <label htmlFor="sidebar-cluster" className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+        <label htmlFor="sidebar-cluster" className="mb-1 block text-xs font-medium text-zinc-400">
           {t("sidebar.cluster")}
         </label>
         <select
@@ -99,12 +100,15 @@ export function Sidebar() {
       </div>
 
       <div className="rounded-md border border-zinc-800 bg-zinc-900/50 p-3">
-        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-400">{t("sidebar.currentWallet")}</div>
+        <div className="mb-1 text-xs font-medium text-zinc-400">{t("sidebar.currentWallet")}</div>
         {currentWallet ? (
           <div className="space-y-1">
             <div className="truncate text-sm text-zinc-100">{currentWallet.name}</div>
-            <div className="truncate font-mono text-xs text-zinc-500">
-              {currentWallet.address.slice(0, 4)}…{currentWallet.address.slice(-4)}
+            <div className="flex items-center gap-1">
+              <span className="truncate font-mono text-xs text-zinc-500" title={currentWallet.address}>
+                {currentWallet.address.slice(0, 4)}…{currentWallet.address.slice(-4)}
+              </span>
+              <CopyButton text={currentWallet.address} className="shrink-0 px-1.5" />
             </div>
             <div className="text-sm text-emerald-400">
               {lamports === null ? "…" : <AmountValue raw={lamports} decimals={9} symbol="SOL" unit={t("common.lamports")} stacked />}

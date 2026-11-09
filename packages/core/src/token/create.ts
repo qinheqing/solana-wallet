@@ -18,7 +18,9 @@ import {
   createInitializeMetadataPointerInstruction,
   createInitializeMint2Instruction,
   createInitializeMintInstruction,
+  createInitializeMintCloseAuthorityInstruction,
   createInitializeNonTransferableMintInstruction,
+  createInitializePausableConfigInstruction,
   createInitializePermanentDelegateInstruction,
   createInitializeScaledUiAmountConfigInstruction,
   createInitializeTransferFeeConfigInstruction,
@@ -42,6 +44,11 @@ import {
   type SendTokenOptions,
   type TokenTxResult,
 } from "./internal.js";
+import {
+  createMetaplexMetadataInstruction,
+  validateTokenMetadata,
+  type TokenMetadataInput,
+} from "./metaplex.js";
 
 const MAX_DECIMALS = 18; // u256-based supply; SPL tooling caps at 18
 const MAX_BPS = 10_000; // 100% in basis points
@@ -93,6 +100,22 @@ export interface Token2022ExtensionOptions {
    * every amount this library accepts or returns stay raw base units — the
    * wallet never scales amounts by this multiplier.
    */
+  /**
+   * Pausable: the pause authority can halt ALL transfers, mints and burns of
+   * this mint (pause/resume at runtime).
+   */
+  pausable?: {
+    /** Pause authority. Defaults to the payer. */
+    authority?: string | PublicKey;
+  };
+  /**
+   * MintCloseAuthority: lets the close authority close the mint account
+   * (reclaiming its rent) once supply is 0.
+   */
+  mintCloseAuthority?: {
+    /** Close authority. Defaults to the payer. */
+    closeAuthority?: string | PublicKey;
+  };
   scaledUiAmount?: {
     /** Display multiplier (f64 on chain), must be > 0. */
     multiplier: number;
@@ -125,6 +148,10 @@ function validateMintParams(opts: CreateMintOptions): void {
 }
 
 function validateExtensions(ext: Token2022ExtensionOptions): void {
+  if (ext.tokenMetadata) {
+    // Token-2022 metadata has no hard byte caps; only reject empty name/symbol.
+    validateTokenMetadata(ext.tokenMetadata, { name: 1024, symbol: 1024, uri: 4096 });
+  }
   const fee = ext.transferFeeConfig;
   if (fee) {
     if (
@@ -215,12 +242,31 @@ function authorityKey(
 export async function createSplToken(
   conn: ClusterConnection,
   from: Keypair,
-  opts: CreateMintOptions,
+  opts: CreateMintOptions & {
+    /**
+     * Name/symbol/uri via a Metaplex Token Metadata account, created in the
+     * same transaction. Requires the Metaplex program on the cluster.
+     */
+    metadata?: TokenMetadataInput;
+  },
 ): Promise<CreateTokenResult> {
   validateMintParams(opts);
+  if (opts.metadata) validateTokenMetadata(opts.metadata);
   const mint = Keypair.generate();
   const mintAuthority = authorityKey(opts.mintAuthority, from.publicKey)!;
   const freezeAuthority = authorityKey(opts.freezeAuthority, from.publicKey);
+  const extraSigners = [mint];
+  if (opts.metadata && !mintAuthority.equals(from.publicKey)) {
+    // Metaplex requires the mint authority to sign CreateMetadataAccountV3.
+    if (opts.mintAuthority instanceof Keypair) {
+      extraSigners.push(opts.mintAuthority);
+    } else {
+      throw new SolwalletError("Creating metadata requires the mint authority to sign.", {
+        code: "METADATA_INVALID",
+        hint: "Pass mintAuthority as a Keypair, or leave it as the payer, when setting metadata.",
+      });
+    }
+  }
 
   const lamports = await conn.connection.getMinimumBalanceForRentExemption(82);
   const instructions = [
@@ -238,14 +284,29 @@ export async function createSplToken(
       freezeAuthority,
     ),
   ];
+  if (opts.metadata) {
+    instructions.push(
+      createMetaplexMetadataInstruction({
+        mint: mint.publicKey,
+        mintAuthority,
+        payer: from.publicKey,
+        updateAuthority: from.publicKey,
+        metadata: opts.metadata,
+      }),
+    );
+  }
 
   const result = await signAndSendTokenTx(conn, from, instructions, {
     dryRun: opts.dryRun,
     allowMainnet: opts.allowMainnet,
     policy: opts.policy,
-    extraSigners: [mint],
+    extraSigners,
   });
-  return { ...result, mint: mint.publicKey.toBase58(), extensions: [] };
+  return {
+    ...result,
+    mint: mint.publicKey.toBase58(),
+    extensions: opts.metadata ? ["metaplexMetadata"] : [],
+  };
 }
 
 /**
@@ -282,6 +343,8 @@ export async function createToken2022(
   if (hasMetadata) extensionTypes.push(ExtensionType.MetadataPointer);
   if (ext.defaultAccountState) extensionTypes.push(ExtensionType.DefaultAccountState);
   if (ext.scaledUiAmount) extensionTypes.push(ExtensionType.ScaledUiAmountConfig);
+  if (ext.pausable) extensionTypes.push(ExtensionType.PausableConfig);
+  if (ext.mintCloseAuthority) extensionTypes.push(ExtensionType.MintCloseAuthority);
 
   const space = getMintLen(extensionTypes);
   const metadataLen = hasMetadata
@@ -382,6 +445,25 @@ export async function createToken2022(
         mint.publicKey,
         ext.scaledUiAmount.authority ? toPublicKey(ext.scaledUiAmount.authority) : from.publicKey,
         ext.scaledUiAmount.multiplier,
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+  }
+
+  if (ext.pausable) {
+    instructions.push(
+      createInitializePausableConfigInstruction(
+        mint.publicKey,
+        ext.pausable.authority ? toPublicKey(ext.pausable.authority) : from.publicKey,
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+  }
+  if (ext.mintCloseAuthority) {
+    instructions.push(
+      createInitializeMintCloseAuthorityInstruction(
+        mint.publicKey,
+        ext.mintCloseAuthority.closeAuthority ? toPublicKey(ext.mintCloseAuthority.closeAuthority) : from.publicKey,
         TOKEN_2022_PROGRAM_ID,
       ),
     );

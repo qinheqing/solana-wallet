@@ -52,7 +52,7 @@ export function AddressToolsCard() {
         <div>
           <Label htmlFor="addrtools-owner">{t("addr.owner")}</Label>
           <div className="flex gap-2">
-            <Input id="addrtools-owner" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder={t("addr.ownerPlaceholder")} />
+            <Input className="font-mono" id="addrtools-owner" value={owner} onChange={(e) => setOwner(e.target.value)} placeholder={t("addr.ownerPlaceholder")} />
             {currentWallet && (
               <Button variant="ghost" className="shrink-0 text-xs" onClick={() => setOwner(currentWallet.address)}>
                 {t("addr.useCurrent")}
@@ -62,7 +62,7 @@ export function AddressToolsCard() {
         </div>
         <div>
           <Label htmlFor="addrtools-mint">{t("addr.mint")}</Label>
-          <Input id="addrtools-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder={t("addr.mintPlaceholder")} />
+          <Input className="font-mono" id="addrtools-mint" value={mint} onChange={(e) => setMint(e.target.value)} placeholder={t("addr.mintPlaceholder")} />
         </div>
       </div>
       <label className="flex items-center gap-2 text-xs text-zinc-400">

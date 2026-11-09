@@ -31,3 +31,14 @@ body {
 ::-webkit-scrollbar-track {
   background-color: transparent;
 }
+
+/* Monospace reads larger than the UI sans at the same size: keep address /
+   signature inputs visually aligned with regular text inputs. */
+input.font-mono,
+textarea.font-mono {
+  font-size: 0.8125rem;
+}
+input.font-mono::placeholder,
+textarea.font-mono::placeholder {
+  font-size: 0.875rem;
+}

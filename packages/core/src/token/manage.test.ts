@@ -9,6 +9,7 @@ import {
   ExtensionType,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
+  TokenInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { Keypair, PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
@@ -16,7 +17,14 @@ import { describe, expect, it, vi } from "vitest";
 import { ClusterConnection } from "../connection/connection.js";
 import {
   burnTokens,
+  closeMint,
   disableMemoTransfer,
+  findWithheldAccounts,
+  pauseMint,
+  resumeMint,
+  setExtensionAuthority,
+  updateDefaultAccountState,
+  updateInterestRate,
   enableMemoTransfer,
   freezeTokenAccount,
   harvestWithheldToMint,
@@ -449,5 +457,74 @@ describe("updateTransferHookProgram (T-G)", () => {
     await updateTransferHookProgram(conn, { mint, authority, programId: null });
     const ix = decode(txs[0]!)[0]!;
     expect(ix.data.subarray(2, 34)).toEqual(Buffer.alloc(32));
+  });
+});
+
+describe("extension runtime management", () => {
+  it("pauseMint / resumeMint → PausableExtension Pause(1)/Resume(2) signed by the authority", async () => {
+    const { conn, txs, mint } = fakeConn();
+    await pauseMint(conn, { mint, authority });
+    await resumeMint(conn, { mint, authority });
+    const [pause, resume] = [decode(txs[0]!)[0]!, decode(txs[1]!)[0]!];
+    expect(pause.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+    expect(pause.data[0]).toBe(TokenInstruction.PausableExtension);
+    expect(pause.data[1]).toBe(1);
+    expect(resume.data[1]).toBe(2);
+    expect(pause.keys[0]!.equals(mint)).toBe(true);
+  });
+
+  it("pauseMint rejects SPL mints", async () => {
+    const { conn, mint } = fakeConn({ mintOwner: TOKEN_PROGRAM_ID });
+    await expect(pauseMint(conn, { mint, authority })).rejects.toMatchObject({ code: "TOKEN_PROGRAM_MISMATCH" });
+  });
+
+  it("closeMint requires confirmClose", async () => {
+    const { conn, mint, fake } = fakeConn();
+    await expect(closeMint(conn, { mint, authority })).rejects.toMatchObject({ code: "CLOSE_UNCONFIRMED" });
+    expect(fake.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it("updateInterestRate → InterestBearingMintExtension UpdateRate with i16 rate", async () => {
+    const { conn, txs, mint } = fakeConn();
+    await updateInterestRate(conn, { mint, authority, rate: -250 });
+    const ix = decode(txs[0]!)[0]!;
+    expect(ix.data[0]).toBe(TokenInstruction.InterestBearingMintExtension);
+    expect(ix.data[1]).toBe(1); // UpdateRate
+    expect(ix.data.readInt16LE(2)).toBe(-250);
+    await expect(updateInterestRate(conn, { mint, authority, rate: 40_000 })).rejects.toMatchObject({
+      code: "INTEREST_RATE_INVALID",
+    });
+  });
+
+  it("updateDefaultAccountState → DefaultAccountStateExtension Update with the new state", async () => {
+    const { conn, txs, mint } = fakeConn();
+    await updateDefaultAccountState(conn, { mint, freezeAuthority: authority, state: "initialized" });
+    const ix = decode(txs[0]!)[0]!;
+    expect(ix.data[0]).toBe(TokenInstruction.DefaultAccountStateExtension);
+    expect(ix.data[1]).toBe(1); // Update
+    expect(ix.data[2]).toBe(1); // AccountState.Initialized
+  });
+
+  it("setExtensionAuthority → SetAuthority with the extension AuthorityType; revoke needs confirm", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const next = Keypair.generate().publicKey;
+    await setExtensionAuthority(conn, authority, mint, "pausable", next);
+    const ix = decode(txs[0]!)[0]!;
+    expect(ix.data[0]).toBe(6); // SetAuthority
+    expect(ix.data[1]).toBe(16); // AuthorityType.PausableConfig
+    await expect(setExtensionAuthority(conn, authority, mint, "closeMint", null)).rejects.toMatchObject({
+      code: "REVOCATION_UNCONFIRMED",
+    });
+    await setExtensionAuthority(conn, authority, mint, "closeMint", null, { confirmRevoke: true });
+    expect(decode(txs[1]!)[0]!.data[1]).toBe(6); // AuthorityType.CloseMint
+  });
+
+  it("findWithheldAccounts filters the mint's accounts by memcmp and returns [] when none", async () => {
+    const { conn, mint, fake } = fakeConn();
+    (fake as Record<string, unknown>).getProgramAccounts = vi.fn().mockResolvedValue([]);
+    await expect(findWithheldAccounts(conn, mint)).resolves.toEqual([]);
+    const call = ((fake as Record<string, unknown>).getProgramAccounts as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(call[0].equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+    expect(call[1].filters[0].memcmp.bytes).toBe(mint.toBase58());
   });
 });

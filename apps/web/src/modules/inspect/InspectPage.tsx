@@ -10,7 +10,7 @@ import { useApp } from "../../lib/AppContext";
 import { useT } from "../../lib/i18n";
 import { Badge, Button, Card, ErrorBanner, Input, Label, Textarea } from "../../components/ui";
 import { AmountValue } from "../../components/Amount";
-import { CopyButton, shortKey } from "../../components/CopyButton";
+import { Address, CopyButton } from "../../components/CopyButton";
 import { downloadText, stringifyJson } from "../../lib/download";
 
 type Mode = "signature" | "json";
@@ -21,13 +21,7 @@ function fmtTime(blockTime: number | null): string {
 }
 
 function KeyCell({ value }: { value: string | null }) {
-  if (!value) return <span className="text-zinc-600">—</span>;
-  return (
-    <span className="inline-flex items-center gap-1" title={value}>
-      <span className="font-mono">{shortKey(value)}</span>
-      <CopyButton text={value} label="⧉" className="px-1" />
-    </span>
-  );
+  return <Address value={value} />;
 }
 
 function MovementRow({ m }: { m: TokenMovement }) {
@@ -154,7 +148,7 @@ export function InspectPage() {
         {mode === "signature" ? (
           <div>
             <Label htmlFor="inspect-signature">{t("tx.signature")}</Label>
-            <Input id="inspect-signature" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder={t("tx.sigPlaceholder")} />
+            <Input className="font-mono" id="inspect-signature" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder={t("tx.sigPlaceholder")} />
             <p className="mt-1 text-xs text-zinc-500">{t("tx.sigHint", { rpc: connection.rpcUrl })}</p>
           </div>
         ) : (
@@ -215,7 +209,7 @@ export function InspectPage() {
                 {failed ? JSON.stringify(result.err) : "null"}
                 {result.decodedError && (
                   <div className="mt-1 text-red-300">
-                    ix #{result.decodedError.instructionIndex ?? "?"} · program {shortKey(result.decodedError.programId)} ·{" "}
+                    ix #{result.decodedError.instructionIndex ?? "?"} · program {result.decodedError.programId} ·{" "}
                     {result.decodedError.name ?? result.decodedError.kind ?? `custom ${result.decodedError.customCode ?? "?"}`}
                   </div>
                 )}
@@ -284,7 +278,9 @@ export function InspectPage() {
                         <td className="py-1 pr-2">
                           <KeyCell value={b.mint} />
                         </td>
-                        <td className="py-1 pr-2 font-mono">{shortKey(b.programId)}</td>
+                        <td className="py-1 pr-2">
+                          <Address value={b.programId} />
+                        </td>
                         <td className="py-1 pr-2">
                           <AmountValue raw={b.pre} decimals={b.decimals} stacked />
                         </td>

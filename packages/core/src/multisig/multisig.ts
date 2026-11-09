@@ -38,6 +38,7 @@ import type { ClusterConnection, ConfirmPolicy } from "../connection/connection.
 import { SolwalletError } from "../connection/errors.js";
 import type { ParsedProgramError } from "../utils/parse-error.js";
 import { parseTransactionError } from "../utils/parse-error.js";
+import { describeVaultMessage, type ProposalAction } from "./describe.js";
 import { dryRun } from "../transfer/dryrun.js";
 
 const { Multisig, ProgramConfig, Proposal } = accounts;
@@ -739,6 +740,12 @@ export interface MultisigProposalSummary {
   approvedBy: string[];
   rejectedBy: string[];
   cancelledBy: string[];
+  /**
+   * What the vault transaction does when executed (decoded from its stored
+   * message). null when the transaction account is missing or not a vault
+   * transaction (e.g. a config transaction).
+   */
+  actions: ProposalAction[] | null;
 }
 
 export interface MultisigProposalList {
@@ -764,9 +771,20 @@ export async function listProposals(
     Array.from({ length: Number(total) }, (_, i) => BigInt(i + 1)).map(async (index) => {
       const [proposalPda] = getProposalPda({ multisigPda, transactionIndex: index });
       const [transactionPda] = getTransactionPda({ multisigPda, index });
-      const info = await conn.connection.getAccountInfo(proposalPda);
+      const [info, txInfo] = await Promise.all([
+        conn.connection.getAccountInfo(proposalPda),
+        conn.connection.getAccountInfo(transactionPda),
+      ]);
       if (!info) return null;
       const proposal = Proposal.fromAccountInfo(info)[0];
+      let actions: ProposalAction[] | null = null;
+      if (txInfo) {
+        try {
+          actions = describeVaultMessage(accounts.VaultTransaction.fromAccountInfo(txInfo)[0].message);
+        } catch {
+          actions = null; // not a vault transaction (config tx etc.)
+        }
+      }
       const status = statusName(proposal.status);
       return {
         transactionIndex: index.toString(),
@@ -777,6 +795,7 @@ export async function listProposals(
         approvedBy: proposal.approved.map((k) => k.toBase58()),
         rejectedBy: proposal.rejected.map((k) => k.toBase58()),
         cancelledBy: proposal.cancelled.map((k) => k.toBase58()),
+        actions,
       } satisfies MultisigProposalSummary;
     }),
   );

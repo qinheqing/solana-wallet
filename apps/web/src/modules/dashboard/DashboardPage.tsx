@@ -4,6 +4,7 @@ import { useApp } from "../../lib/AppContext";
 import { useT } from "../../lib/i18n";
 import { Card, ErrorBanner } from "../../components/ui";
 import { AmountValue } from "../../components/Amount";
+import { CopyButton } from "../../components/CopyButton";
 
 export function DashboardPage() {
   const t = useT();
@@ -48,7 +49,7 @@ export function DashboardPage() {
   }, [connection, currentWallet]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <h2 className="text-xl font-semibold">{t("dashboard.title")}</h2>
 
       <Card>
@@ -71,17 +72,18 @@ export function DashboardPage() {
         {currentWallet && balanceError && <ErrorBanner>{balanceError}</ErrorBanner>}
         {currentWallet && balance && (
           <div className="space-y-3">
-            <div className="flex items-baseline gap-2">
+            <div className="flex items-center gap-2">
               <span className="break-all font-mono text-sm text-zinc-400">{balance.address}</span>
+              <CopyButton text={balance.address} className="shrink-0" />
             </div>
             <div>
-              <div className="text-xs uppercase tracking-wide text-zinc-500">{t("dashboard.solBalance")}</div>
+              <div className="text-xs text-zinc-500">{t("dashboard.solBalance")}</div>
               <div className="text-2xl font-semibold text-emerald-400">
                 <AmountValue raw={balance.solLamports} decimals={9} symbol="SOL" unit={t("common.lamports")} stacked />
               </div>
             </div>
             <div>
-              <div className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+              <div className="mb-1 text-xs text-zinc-500">
                 {t("dashboard.tokenAccounts", { n: balance.tokens.length })}
               </div>
               {balance.tokens.length === 0 && <div className="text-sm text-zinc-600">{t("common.none")}</div>}
@@ -106,7 +108,7 @@ export function DashboardPage() {
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="text-xs text-zinc-500">{label}</div>
       <div className="text-lg font-semibold text-zinc-100">{value}</div>
     </div>
   );

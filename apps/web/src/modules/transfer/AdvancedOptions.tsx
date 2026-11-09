@@ -174,11 +174,11 @@ export function AdvancedOptions({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="adv-authority">{t("adv.authority")}</Label>
-                <Input id="adv-authority" disabled={!isToken} placeholder={t("adv.defaultWallet")} value={value.authority} onChange={(e) => set("authority", e.target.value)} />
+                <Input className="font-mono" id="adv-authority" disabled={!isToken} placeholder={t("adv.defaultWallet")} value={value.authority} onChange={(e) => set("authority", e.target.value)} />
               </div>
               <div>
                 <Label htmlFor="adv-source-owner">{t("adv.sourceOwner")}</Label>
-                <Input id="adv-source-owner" disabled={!isToken} placeholder={t("adv.defaultWallet")} value={value.sourceOwner} onChange={(e) => set("sourceOwner", e.target.value)} />
+                <Input className="font-mono" id="adv-source-owner" disabled={!isToken} placeholder={t("adv.defaultWallet")} value={value.sourceOwner} onChange={(e) => set("sourceOwner", e.target.value)} />
               </div>
             </div>
             {value.authority.trim() && <p className="text-xs text-amber-300">{t("adv.authorityWarn")}</p>}

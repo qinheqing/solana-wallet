@@ -16,6 +16,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { ClusterConnection } from "../connection/connection.js";
 import { createSplToken, createToken2022 } from "./create.js";
+import { decodeMetaplexMetadata, METAPLEX_TOKEN_METADATA_PROGRAM_ID, metaplexMetadataPda } from "./metaplex.js";
 
 // ---------------------------------------------------------------------------
 // Fake connection (no mint registry needed — creation touches fresh keys).
@@ -79,6 +80,27 @@ function recordingConn() {
   return { ...base, txs };
 }
 
+describe("createToken2022 pausable + mintCloseAuthority", () => {
+  it("allocates both extensions and initializes them before initializeMint2", async () => {
+    const { conn, txs, fake } = recordingConn();
+    const result = await createToken2022(conn, payer, {
+      decimals: 6,
+      extensions: { pausable: {}, mintCloseAuthority: {} },
+    });
+    expect(result.extensions).toEqual(["pausable", "mintCloseAuthority"]);
+    expect(fake.getMinimumBalanceForRentExemption).toHaveBeenCalledWith(
+      getMintLen([ExtensionType.PausableConfig, ExtensionType.MintCloseAuthority]),
+    );
+    const ixs = decodeInstructions(txs[0]!);
+    // createAccount, pausable init, mintClose init, initializeMint2
+    expect(ixs).toHaveLength(4);
+    expect(ixs[1]!.programId).toEqual(TOKEN_2022_PROGRAM_ID);
+    expect(ixs[2]!.data[0]).toBe(25); // InitializeMintCloseAuthority
+    expect(ixs[2]!.data.subarray(2, 34).equals(payer.publicKey.toBuffer())).toBe(true);
+    expect(ixs[3]!.data[0]).toBe(20); // InitializeMint2
+  });
+});
+
 describe("createSplToken (8.1)", () => {
   it("builds createAccount + initializeMint on the SPL Token program", async () => {
     const { conn, txs, fake } = recordingConn();
@@ -116,6 +138,65 @@ describe("createSplToken (8.1)", () => {
     await expect(createSplToken(conn, payer, { decimals: -1 })).rejects.toMatchObject({ code: "DECIMALS_INVALID" });
     await expect(createSplToken(conn, payer, { decimals: 19 })).rejects.toMatchObject({ code: "DECIMALS_INVALID" });
     await expect(createSplToken(conn, payer, { decimals: 2.5 })).rejects.toMatchObject({ code: "DECIMALS_INVALID" });
+  });
+
+  it("adds a Metaplex CreateMetadataAccountV3 when metadata is given", async () => {
+    const { conn, txs } = recordingConn();
+    const result = await createSplToken(conn, payer, {
+      decimals: 6,
+      metadata: { name: "Test Coin", symbol: "TST", uri: "https://x/y.json" },
+    });
+    expect(result.extensions).toEqual(["metaplexMetadata"]);
+    const ixs = decodeInstructions(txs[0]!);
+    expect(ixs).toHaveLength(3);
+    const md = ixs[2]!;
+    expect(md.programId).toEqual(METAPLEX_TOKEN_METADATA_PROGRAM_ID);
+    expect(md.data[0]).toBe(33);
+    const mintKey = ixs[0]!.keys[1]!.pubkey;
+    expect(md.keys[0]!.pubkey).toEqual(metaplexMetadataPda(mintKey));
+    expect(md.keys[1]!.pubkey).toEqual(mintKey);
+    expect(md.keys[2]!.pubkey).toEqual(payer.publicKey);
+    expect(md.keys[2]!.isSigner).toBe(true);
+    // name/symbol/uri borsh strings follow the discriminator
+    const nameLen = md.data.readUInt32LE(1);
+    expect(md.data.subarray(5, 5 + nameLen).toString()).toBe("Test Coin");
+    const symOff = 5 + nameLen;
+    const symLen = md.data.readUInt32LE(symOff);
+    expect(md.data.subarray(symOff + 4, symOff + 4 + symLen).toString()).toBe("TST");
+  });
+
+  it("rejects metadata with only name, or oversize symbol", async () => {
+    const { conn } = recordingConn();
+    await expect(
+      createSplToken(conn, payer, { decimals: 6, metadata: { name: "A", symbol: "" } }),
+    ).rejects.toMatchObject({ code: "METADATA_INVALID" });
+    await expect(
+      createSplToken(conn, payer, { decimals: 6, metadata: { name: "A", symbol: "TOOLONGSYMBOL" } }),
+    ).rejects.toMatchObject({ code: "METADATA_INVALID" });
+  });
+
+  it("decodeMetaplexMetadata reads back name/symbol/uri (null-padded)", () => {
+    const str = (v: string, pad: number) => {
+      const b = Buffer.alloc(4 + pad);
+      b.writeUInt32LE(pad, 0);
+      b.write(v, 4);
+      return b;
+    };
+    const data = Buffer.concat([
+      Buffer.from([4]),
+      payer.publicKey.toBuffer(),
+      Keypair.generate().publicKey.toBuffer(),
+      str("My Token", 32),
+      str("MYT", 10),
+      str("https://u", 200),
+    ]);
+    expect(decodeMetaplexMetadata(data)).toEqual({
+      updateAuthority: payer.publicKey.toBase58(),
+      name: "My Token",
+      symbol: "MYT",
+      uri: "https://u",
+    });
+    expect(decodeMetaplexMetadata(Buffer.from([1, 2, 3]))).toBeNull();
   });
 
   it("dryRun simulates and never sends", async () => {

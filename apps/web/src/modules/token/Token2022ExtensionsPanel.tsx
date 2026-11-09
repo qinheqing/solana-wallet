@@ -9,9 +9,10 @@ export interface ExtensionFormState {
   interestBearing: { enabled: boolean; rate: string };
   nonTransferable: { enabled: boolean };
   permanentDelegate: { enabled: boolean; delegate: string };
-  tokenMetadata: { enabled: boolean; name: string; symbol: string; uri: string };
   defaultAccountState: { enabled: boolean };
   scaledUiAmount: { enabled: boolean; multiplier: string };
+  pausable: { enabled: boolean };
+  mintCloseAuthority: { enabled: boolean };
 }
 
 export function makeDefaultExtensionFormState(): ExtensionFormState {
@@ -21,9 +22,10 @@ export function makeDefaultExtensionFormState(): ExtensionFormState {
     interestBearing: { enabled: false, rate: "0" },
     nonTransferable: { enabled: false },
     permanentDelegate: { enabled: false, delegate: "" },
-    tokenMetadata: { enabled: false, name: "", symbol: "", uri: "" },
     defaultAccountState: { enabled: false },
     scaledUiAmount: { enabled: false, multiplier: "1.5" },
+    pausable: { enabled: false },
+    mintCloseAuthority: { enabled: false },
   };
 }
 
@@ -58,14 +60,6 @@ export function buildToken2022Extensions(
     extensions.permanentDelegate = { delegate: state.permanentDelegate.delegate.trim() };
     summary.push(t("ext.sum.pd", { delegate: state.permanentDelegate.delegate.trim() }));
   }
-  if (state.tokenMetadata.enabled && state.tokenMetadata.name.trim() && state.tokenMetadata.symbol.trim()) {
-    extensions.tokenMetadata = {
-      name: state.tokenMetadata.name.trim(),
-      symbol: state.tokenMetadata.symbol.trim(),
-      uri: state.tokenMetadata.uri.trim(),
-    };
-    summary.push(t("ext.sum.metadata", { name: state.tokenMetadata.name.trim(), symbol: state.tokenMetadata.symbol.trim() }));
-  }
   if (state.defaultAccountState.enabled) {
     extensions.defaultAccountState = { accountState: "frozen" };
     summary.push(t("ext.sum.frozen"));
@@ -73,6 +67,14 @@ export function buildToken2022Extensions(
   if (state.scaledUiAmount.enabled) {
     extensions.scaledUiAmount = { multiplier: Number(state.scaledUiAmount.multiplier) };
     summary.push(t("ext.sum.scaled", { multiplier: state.scaledUiAmount.multiplier }));
+  }
+  if (state.pausable.enabled) {
+    extensions.pausable = {};
+    summary.push(t("ext.sum.pausable"));
+  }
+  if (state.mintCloseAuthority.enabled) {
+    extensions.mintCloseAuthority = {};
+    summary.push(t("ext.sum.mintClose"));
   }
 
   return { extensions: Object.keys(extensions).length > 0 ? extensions : undefined, summary };
@@ -146,7 +148,7 @@ export function Token2022ExtensionsPanel({
         {state.transferHook.enabled && (
           <div>
             <Label htmlFor="token2022extensionspanel-hook-program-address">{t("ext.hookProgram")}</Label>
-            <Input
+            <Input className="font-mono"
               id="token2022extensionspanel-hook-program-address"
               value={state.transferHook.programId}
               onChange={(e) => onChange({ ...state, transferHook: { ...state.transferHook, programId: e.target.value } })}
@@ -196,49 +198,12 @@ export function Token2022ExtensionsPanel({
             <RiskBanner>{t("ext.pdWarn")}</RiskBanner>
             <div>
               <Label htmlFor="token2022extensionspanel-permanent-delegate-address">{t("ext.pdAddress")}</Label>
-              <Input
+              <Input className="font-mono"
                 id="token2022extensionspanel-permanent-delegate-address"
                 value={state.permanentDelegate.delegate}
                 onChange={(e) =>
                   onChange({ ...state, permanentDelegate: { ...state.permanentDelegate, delegate: e.target.value } })
                 }
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Token metadata */}
-      <div className="space-y-2 rounded-md border border-zinc-800 p-3">
-        <Toggle
-          checked={state.tokenMetadata.enabled}
-          onChange={(enabled) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, enabled } })}
-          label={t("ext.metadata")}
-        />
-        {state.tokenMetadata.enabled && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div>
-              <Label htmlFor="token2022extensionspanel-name">{t("ext.name")}</Label>
-              <Input
-                id="token2022extensionspanel-name"
-                value={state.tokenMetadata.name}
-                onChange={(e) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, name: e.target.value } })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="token2022extensionspanel-symbol">{t("ext.symbol")}</Label>
-              <Input
-                id="token2022extensionspanel-symbol"
-                value={state.tokenMetadata.symbol}
-                onChange={(e) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, symbol: e.target.value } })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="token2022extensionspanel-uri">{t("ext.uri")}</Label>
-              <Input
-                id="token2022extensionspanel-uri"
-                value={state.tokenMetadata.uri}
-                onChange={(e) => onChange({ ...state, tokenMetadata: { ...state.tokenMetadata, uri: e.target.value } })}
               />
             </div>
           </div>
@@ -273,6 +238,26 @@ export function Token2022ExtensionsPanel({
             <div className="text-xs text-zinc-500">{t("ext.scaledHint")}</div>
           </div>
         )}
+      </div>
+
+      {/* Pausable */}
+      <div className="space-y-2 rounded-md border border-zinc-800 p-3">
+        <Toggle
+          checked={state.pausable.enabled}
+          onChange={(enabled) => onChange({ ...state, pausable: { enabled } })}
+          label={t("ext.pausable")}
+        />
+        {state.pausable.enabled && <div className="text-xs text-zinc-500">{t("ext.pausableHint")}</div>}
+      </div>
+
+      {/* Mint close authority */}
+      <div className="space-y-2 rounded-md border border-zinc-800 p-3">
+        <Toggle
+          checked={state.mintCloseAuthority.enabled}
+          onChange={(enabled) => onChange({ ...state, mintCloseAuthority: { enabled } })}
+          label={t("ext.mintClose")}
+        />
+        {state.mintCloseAuthority.enabled && <div className="text-xs text-zinc-500">{t("ext.mintCloseHint")}</div>}
       </div>
     </div>
   );

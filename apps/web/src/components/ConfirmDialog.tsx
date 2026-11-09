@@ -27,7 +27,7 @@ export function ConfirmDialog({
   const locked = requireText !== undefined && typed !== requireText;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div data-confirm-dialog className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-xl">
         <h3 className="mb-2 text-base font-semibold text-zinc-100">{title}</h3>
         <div className="mb-4 text-sm text-zinc-300">{description}</div>

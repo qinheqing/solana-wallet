@@ -10,7 +10,16 @@ import {
   ExtensionType,
   TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  AccountState,
   createBurnInstruction,
+  createCloseAccountInstruction,
+  createPauseInstruction,
+  createResumeInstruction,
+  createUpdateDefaultAccountStateInstruction,
+  createUpdateRateInterestBearingMintInstruction,
+  getMint,
+  getTransferFeeAmount,
+  unpackAccount,
   createDisableRequiredMemoTransfersInstruction,
   createEnableRequiredMemoTransfersInstruction,
   createFreezeAccountInstruction,
@@ -294,6 +303,7 @@ async function setAuthority(
   newAuthority: string | PublicKey | null,
   authorityType: AuthorityType,
   opts: SendTokenOptions & { confirmRevoke?: boolean },
+  label?: string,
 ): Promise<TokenManageResult> {
   const mintKey = toPublicKey(mint);
   const program = await getMintProgram(conn, mintKey);
@@ -301,7 +311,7 @@ async function setAuthority(
 
   if (newKey === null && opts.confirmRevoke !== true) {
     throw new SolwalletError(
-      `Refusing to revoke ${authorityType === AuthorityType.MintTokens ? "mint" : "freeze"} authority on ${mintKey.toBase58()}: revocation is IRREVERSIBLE.`,
+      `Refusing to revoke ${label ?? (authorityType === AuthorityType.MintTokens ? "mint" : "freeze")} authority on ${mintKey.toBase58()}: revocation is IRREVERSIBLE.`,
       {
         code: "REVOCATION_UNCONFIRMED",
         hint: "Pass { confirmRevoke: true } to permanently renounce this authority. Nobody will ever be able to mint more tokens (or freeze accounts) afterwards.",
@@ -639,4 +649,231 @@ export async function updateTransferHookProgram(
     ],
     opts,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Extension runtime management: pausable, mint close, interest rate,
+// default account state, extension authorities, withheld-fee discovery
+// ---------------------------------------------------------------------------
+
+export interface MintAuthorityParams {
+  mint: string | PublicKey;
+  /** The relevant extension authority (signs). */
+  authority: Keypair;
+}
+
+/** Pause a Pausable mint: all transfers, mints and burns fail until resumed. */
+export async function pauseMint(
+  conn: ClusterConnection,
+  params: MintAuthorityParams,
+  opts: SendTokenOptions = {},
+): Promise<TokenManageResult> {
+  const mintKey = toPublicKey(params.mint);
+  await requireToken2022(conn, mintKey);
+  return signAndSendTokenTx(
+    conn,
+    params.authority,
+    [createPauseInstruction(mintKey, params.authority.publicKey, [], TOKEN_2022_PROGRAM_ID)],
+    opts,
+  );
+}
+
+/** Resume a paused Pausable mint. */
+export async function resumeMint(
+  conn: ClusterConnection,
+  params: MintAuthorityParams,
+  opts: SendTokenOptions = {},
+): Promise<TokenManageResult> {
+  const mintKey = toPublicKey(params.mint);
+  await requireToken2022(conn, mintKey);
+  return signAndSendTokenTx(
+    conn,
+    params.authority,
+    [createResumeInstruction(mintKey, params.authority.publicKey, [], TOKEN_2022_PROGRAM_ID)],
+    opts,
+  );
+}
+
+export interface CloseMintParams extends MintAuthorityParams {
+  /** Receives the mint's rent lamports. Defaults to the authority. */
+  destination?: string | PublicKey;
+  /** Closing is irreversible; must be true. */
+  confirmClose?: boolean;
+}
+
+/**
+ * Close a Token-2022 mint with the MintCloseAuthority extension (supply must
+ * be 0). Rent goes to `destination`. IRREVERSIBLE: requires confirmClose.
+ */
+export async function closeMint(
+  conn: ClusterConnection,
+  params: CloseMintParams,
+  opts: SendTokenOptions = {},
+): Promise<TokenManageResult> {
+  const mintKey = toPublicKey(params.mint);
+  if (params.confirmClose !== true) {
+    throw new SolwalletError(`Refusing to close mint ${mintKey.toBase58()}: closing is IRREVERSIBLE.`, {
+      code: "CLOSE_UNCONFIRMED",
+      hint: "Pass { confirmClose: true } to permanently close the mint account.",
+    });
+  }
+  await requireToken2022(conn, mintKey);
+  const mint = await getMint(conn.connection, mintKey, "confirmed", TOKEN_2022_PROGRAM_ID);
+  if (mint.supply > 0n) {
+    throw new SolwalletError(`Mint ${mintKey.toBase58()} still has supply ${mint.supply}; only an empty mint can be closed.`, {
+      code: "MINT_SUPPLY_NONZERO",
+      hint: "Burn all outstanding tokens first (supply must be 0).",
+    });
+  }
+  const destination = params.destination ? toPublicKey(params.destination) : params.authority.publicKey;
+  return signAndSendTokenTx(
+    conn,
+    params.authority,
+    [createCloseAccountInstruction(mintKey, destination, params.authority.publicKey, [], TOKEN_2022_PROGRAM_ID)],
+    opts,
+  );
+}
+
+export interface UpdateInterestRateParams extends MintAuthorityParams {
+  /** New rate in basis points per year (i16). */
+  rate: number;
+}
+
+/** Update an InterestBearing mint's rate (requires the rate authority). */
+export async function updateInterestRate(
+  conn: ClusterConnection,
+  params: UpdateInterestRateParams,
+  opts: SendTokenOptions = {},
+): Promise<TokenManageResult> {
+  if (!Number.isInteger(params.rate) || params.rate < -32_768 || params.rate > 32_767) {
+    throw new SolwalletError(`interest rate must be an integer between -32768 and 32767, got ${params.rate}.`, {
+      code: "INTEREST_RATE_INVALID",
+      hint: "The rate is basis points per year stored as a signed i16.",
+    });
+  }
+  const mintKey = toPublicKey(params.mint);
+  await requireToken2022(conn, mintKey);
+  return signAndSendTokenTx(
+    conn,
+    params.authority,
+    [
+      createUpdateRateInterestBearingMintInstruction(
+        mintKey,
+        params.authority.publicKey,
+        params.rate,
+        [],
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    ],
+    opts,
+  );
+}
+
+export interface UpdateDefaultAccountStateParams {
+  mint: string | PublicKey;
+  /** The mint's FREEZE authority (signs). */
+  freezeAuthority: Keypair;
+  state: "initialized" | "frozen";
+}
+
+/** Change the state new token accounts of this mint start in. */
+export async function updateDefaultAccountState(
+  conn: ClusterConnection,
+  params: UpdateDefaultAccountStateParams,
+  opts: SendTokenOptions = {},
+): Promise<TokenManageResult> {
+  const mintKey = toPublicKey(params.mint);
+  await requireToken2022(conn, mintKey);
+  return signAndSendTokenTx(
+    conn,
+    params.freezeAuthority,
+    [
+      createUpdateDefaultAccountStateInstruction(
+        mintKey,
+        params.state === "frozen" ? AccountState.Frozen : AccountState.Initialized,
+        params.freezeAuthority.publicKey,
+        [],
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    ],
+    opts,
+  );
+}
+
+/** Token-2022 extension authorities that can be rotated with SetAuthority. */
+export const EXTENSION_AUTHORITY_TYPES = {
+  transferFeeConfig: AuthorityType.TransferFeeConfig,
+  withheldWithdraw: AuthorityType.WithheldWithdraw,
+  closeMint: AuthorityType.CloseMint,
+  interestRate: AuthorityType.InterestRate,
+  permanentDelegate: AuthorityType.PermanentDelegate,
+  transferHookProgramId: AuthorityType.TransferHookProgramId,
+  metadataPointer: AuthorityType.MetadataPointer,
+  scaledUiAmount: AuthorityType.ScaledUiAmountConfig,
+  pausable: AuthorityType.PausableConfig,
+} as const;
+
+export type ExtensionAuthorityKind = keyof typeof EXTENSION_AUTHORITY_TYPES;
+
+/**
+ * Rotate (or revoke with confirmRevoke) one Token-2022 extension authority.
+ * `from` must be the current holder of that authority.
+ */
+export async function setExtensionAuthority(
+  conn: ClusterConnection,
+  from: Keypair,
+  mint: string | PublicKey,
+  kind: ExtensionAuthorityKind,
+  newAuthority: string | PublicKey | null,
+  opts: SendTokenOptions & { confirmRevoke?: boolean } = {},
+): Promise<TokenManageResult> {
+  const authorityType = EXTENSION_AUTHORITY_TYPES[kind];
+  if (authorityType === undefined) {
+    throw new SolwalletError(`Unknown extension authority kind "${kind}".`, {
+      code: "AUTHORITY_KIND_INVALID",
+      hint: `One of: ${Object.keys(EXTENSION_AUTHORITY_TYPES).join(", ")}.`,
+    });
+  }
+  const mintKey = toPublicKey(mint);
+  await requireToken2022(conn, mintKey);
+  return setAuthority(conn, from, mintKey, newAuthority, authorityType, opts, kind);
+}
+
+export interface WithheldAccount {
+  /** Token account address. */
+  address: string;
+  owner: string;
+  /** Withheld transfer fees in this account, raw base units. */
+  withheldAmount: string;
+}
+
+/**
+ * Find token accounts of a Token-2022 mint holding withheld transfer fees
+ * (getProgramAccounts filtered by mint). Some public RPCs disable or rate
+ * limit getProgramAccounts on mainnet.
+ */
+export async function findWithheldAccounts(
+  conn: ClusterConnection,
+  mint: string | PublicKey,
+): Promise<WithheldAccount[]> {
+  const mintKey = toPublicKey(mint);
+  await requireToken2022(conn, mintKey);
+  const accounts = await conn.connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+    commitment: "confirmed",
+    filters: [{ memcmp: { offset: 0, bytes: mintKey.toBase58() } }],
+  });
+  const out: WithheldAccount[] = [];
+  for (const { pubkey, account } of accounts) {
+    try {
+      const acc = unpackAccount(pubkey, account, TOKEN_2022_PROGRAM_ID);
+      const fee = getTransferFeeAmount(acc);
+      if (fee && fee.withheldAmount > 0n) {
+        out.push({ address: pubkey.toBase58(), owner: acc.owner.toBase58(), withheldAmount: fee.withheldAmount.toString() });
+      }
+    } catch {
+      // not a token account (e.g. the mint itself matched the memcmp) — skip
+    }
+  }
+  out.sort((a, b) => (BigInt(b.withheldAmount) > BigInt(a.withheldAmount) ? 1 : -1));
+  return out;
 }
