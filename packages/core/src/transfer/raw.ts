@@ -60,6 +60,16 @@ export interface ParsedRawTransaction {
 /** Parse a hex/base64 payload into a VersionedTransaction (legacy or v0). */
 export function parseRawTransaction(input: string): ParsedRawTransaction {
   const { bytes, encoding } = decodeRawTransaction(input);
+  const version = messageVersionOf(bytes);
+  if (version !== undefined && version !== "legacy" && version !== 0) {
+    throw new SolwalletError(
+      `Unsupported transaction message version ${version} — only legacy and v0 are supported.`,
+      {
+        code: "UNSUPPORTED_TX_VERSION",
+        hint: `The message prefix byte declares version ${version}; this wallet signs, simulates and sends legacy and v0 transactions only.`,
+      },
+    );
+  }
   let tx: VersionedTransaction;
   try {
     tx = VersionedTransaction.deserialize(bytes);
@@ -83,6 +93,27 @@ export function parseRawTransaction(input: string): ParsedRawTransaction {
     }
   }
   return { tx, kind: tx.version === "legacy" ? "legacy" : "v0", encoding };
+}
+
+/**
+ * Read the message version from a serialized transaction without parsing
+ * it: skip the compact-u16 signature count and 64 bytes per signature, then
+ * inspect the prefix byte (high bit set = versioned, low 7 bits = version).
+ * Returns undefined when the bytes are too short to tell.
+ */
+export function messageVersionOf(bytes: Uint8Array): "legacy" | number | undefined {
+  let count = 0;
+  let offset = 0;
+  for (let shift = 0; shift < 21; shift += 7) {
+    const b = bytes[offset];
+    if (b === undefined) return undefined;
+    offset += 1;
+    count |= (b & 0x7f) << shift;
+    if ((b & 0x80) === 0) break;
+  }
+  const prefix = bytes[offset + count * 64];
+  if (prefix === undefined) return undefined;
+  return prefix & 0x80 ? prefix & 0x7f : "legacy";
 }
 
 export interface RawSignature {

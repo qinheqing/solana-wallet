@@ -62,6 +62,7 @@ export {
 export {
   buildTransferInstructions,
   buildTransferPlan,
+  resolveTransferTokenAccounts,
   createMemoInstruction,
   MEMO_PROGRAM_ID,
   TOKEN_PROGRAM_IDS,
@@ -88,6 +89,7 @@ export {
 // --- PRD T-D: raw transaction channel -------------------------------------
 export {
   decodeRawTransaction,
+  messageVersionOf,
   parseRawTransaction,
   signTransactionHex,
   simulateRaw,
@@ -201,3 +203,19 @@ export * from "./token/index.js";
 
 // --- T-A / T-E: address derivation, mint/account/transaction inspection ----
 export * from "./inspect/index.js";
+
+// --- address lookup tables -------------------------------------------------
+export {
+  LOOKUP_TABLE_EXTEND_CHUNK,
+  closeLookupTable,
+  createLookupTable,
+  deactivateLookupTable,
+  extendLookupTable,
+  fetchLookupTable,
+  fetchLookupTables,
+  inspectLookupTable,
+  type CreateLookupTableOptions,
+  type LookupTableInspection,
+  type LookupTableResult,
+  type LookupTableTx,
+} from "./lookup-table/lookup-table.js";

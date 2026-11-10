@@ -12,6 +12,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   AccountState,
   createBurnInstruction,
+  createBurnCheckedInstruction,
   createCloseAccountInstruction,
   createPauseInstruction,
   createResumeInstruction,
@@ -126,28 +127,40 @@ const METADATA_FIELDS = {
 
 /**
  * Mint `amount` base units to the owner's ATA (created idempotently when
- * missing). Works for both SPL and Token-2022 mints.
+ * missing), or into `opts.destinationAccount` (any token account, never
+ * created — `destinationOwner` may then be null). Works for both SPL and
+ * Token-2022 mints.
  */
 export async function mintTokens(
   conn: ClusterConnection,
   from: Keypair,
   mint: string | PublicKey,
-  destinationOwner: string | PublicKey,
+  destinationOwner: string | PublicKey | null,
   amount: bigint,
-  opts: SendTokenOptions = {},
+  opts: SendTokenOptions & { destinationAccount?: string | PublicKey } = {},
 ): Promise<TokenManageResult> {
   assertPositiveAmount("mintTokens", amount);
   const mintKey = toPublicKey(mint);
-  const ownerKey = toPublicKey(destinationOwner);
   const program = await getMintProgram(conn, mintKey);
 
-  const dest = await prepareAta(conn, from.publicKey, mintKey, ownerKey, program.programId);
   const instructions = [];
-  if (dest.createInstruction) instructions.push(dest.createInstruction);
+  let target: PublicKey;
+  if (opts.destinationAccount) {
+    target = toPublicKey(opts.destinationAccount);
+  } else {
+    if (destinationOwner === null) {
+      throw new SolwalletError("mintTokens needs a destination owner or opts.destinationAccount.", {
+        code: "DESTINATION_REQUIRED",
+      });
+    }
+    const dest = await prepareAta(conn, from.publicKey, mintKey, toPublicKey(destinationOwner), program.programId);
+    if (dest.createInstruction) instructions.push(dest.createInstruction);
+    target = dest.ata;
+  }
   instructions.push(
     createMintToInstruction(
       mintKey,
-      dest.ata,
+      target,
       from.publicKey, // mint authority
       amount,
       [],
@@ -157,34 +170,59 @@ export async function mintTokens(
   return signAndSendTokenTx(conn, from, instructions, opts);
 }
 
-/** Burn `amount` base units from the wallet's own ATA of `mint`. */
+export interface BurnTokensOptions extends SendTokenOptions {
+  /** Token account to burn from (ATA or not). Excludes sourceOwner. */
+  sourceAccount?: string | PublicKey;
+  /** Owner whose ATA is burned from. Default: the signer. */
+  sourceOwner?: string | PublicKey;
+  /** Default "burnChecked" (validates decimals); "burn" emits the unchecked instruction. */
+  instruction?: "burnChecked" | "burn";
+}
+
+/**
+ * Burn `amount` base units. Source: `sourceAccount`, else the ATA of
+ * `sourceOwner` (default: the signer). The signer is the burn authority —
+ * the account owner, its approved delegate, or the mint's permanent
+ * delegate; the token program decides whether it may.
+ */
 export async function burnTokens(
   conn: ClusterConnection,
   from: Keypair,
   mint: string | PublicKey,
   amount: bigint,
-  opts: SendTokenOptions = {},
+  opts: BurnTokensOptions = {},
 ): Promise<TokenManageResult> {
   assertPositiveAmount("burnTokens", amount);
+  if (opts.sourceAccount && opts.sourceOwner) {
+    throw new SolwalletError("sourceAccount and sourceOwner are mutually exclusive.", {
+      code: "OPTION_CONFLICT",
+      hint: "sourceAccount names the token account directly; sourceOwner derives its ATA. Pass one.",
+    });
+  }
   const mintKey = toPublicKey(mint);
   const program = await getMintProgram(conn, mintKey);
-  const ata = await getAssociatedTokenAddress(mintKey, from.publicKey, true, program.programId);
-
-  return signAndSendTokenTx(
-    conn,
-    from,
-    [
-      createBurnInstruction(
-        ata,
+  const source = opts.sourceAccount
+    ? toPublicKey(opts.sourceAccount)
+    : await getAssociatedTokenAddress(
         mintKey,
-        from.publicKey, // owner
-        amount,
-        [],
+        opts.sourceOwner ? toPublicKey(opts.sourceOwner) : from.publicKey,
+        true,
         program.programId,
-      ),
-    ],
-    opts,
-  );
+      );
+
+  const ix =
+    opts.instruction === "burn"
+      ? createBurnInstruction(source, mintKey, from.publicKey, amount, [], program.programId)
+      : createBurnCheckedInstruction(
+          source,
+          mintKey,
+          from.publicKey, // authority: owner / delegate / permanent delegate
+          amount,
+          (await getMint(conn.connection, mintKey, "confirmed", program.programId)).decimals,
+          [],
+          program.programId,
+        );
+  return signAndSendTokenTx(conn, from, [ix], opts);
 }
 
 /**

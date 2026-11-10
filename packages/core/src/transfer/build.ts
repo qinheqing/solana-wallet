@@ -14,7 +14,7 @@ import {
   createTransferCheckedInstruction,
   createTransferCheckedWithFeeInstruction,
   createTransferInstruction,
-  getAssociatedTokenAddress,
+  getAssociatedTokenAddressSync,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -30,6 +30,7 @@ import { SolwalletError } from "../connection/errors.js";
 import type { InstructionLabel, TransactionPlan } from "./plan.js";
 import { planFromInstructions } from "./plan.js";
 import { getMintProgram, type MintProgram } from "./program.js";
+import { fetchLookupTables } from "../lookup-table/lookup-table.js";
 
 /** SPL Memo program (v2). */
 export const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
@@ -58,8 +59,12 @@ export interface ComputeBudgetOptions {
 export interface BuildTransferOptions {
   /** Wallet paying fees (and, unless sourceOwner/authority say otherwise, owning the source funds). */
   payer: PublicKey;
-  /** SOL recipient (no mint) or token-receiving owner (with mint). */
-  destination: PublicKey;
+  /**
+   * SOL recipient (no mint) or token-receiving owner (with mint; its ATA is
+   * derived). Optional only for token transfers that pass
+   * `destinationTokenAccount`.
+   */
+  destination?: PublicKey;
   /** Omit for native SOL transfer. */
   mint?: PublicKey;
   /** Base units — lamports for SOL, token base units otherwise. */
@@ -86,6 +91,17 @@ export interface BuildTransferOptions {
   authority?: PublicKey;
   /** Owner whose ATA is the source. Default: payer. Token transfers only. */
   sourceOwner?: PublicKey;
+  /**
+   * Explicit source token account (any address, ATA or not) instead of the
+   * derived ATA. Excludes `sourceOwner`. Token transfers only.
+   */
+  sourceTokenAccount?: PublicKey;
+  /**
+   * Explicit destination token account (any address, ATA or not) instead of
+   * the ATA of `destination`. No ATA-creation instruction is emitted.
+   * Token transfers only.
+   */
+  destinationTokenAccount?: PublicKey;
   /** UTF-8 memo; emits a Memo-program instruction right before the transfer. */
   memo?: string;
 }
@@ -152,7 +168,45 @@ function computeBudgetInstructions(
   return out;
 }
 
-const TOKEN_ONLY_KNOBS = ["ataMode", "instruction", "fee", "authority", "sourceOwner"] as const;
+const TOKEN_ONLY_KNOBS = [
+  "ataMode",
+  "instruction",
+  "fee",
+  "authority",
+  "sourceOwner",
+  "sourceTokenAccount",
+  "destinationTokenAccount",
+] as const;
+
+/**
+ * Resolve the source / destination token accounts exactly as the builder
+ * uses them: explicit accounts win, otherwise the ATAs of sourceOwner
+ * (default payer) and destination. Also validates the option combination.
+ */
+export function resolveTransferTokenAccounts(
+  opts: BuildTransferOptions & { mint: PublicKey },
+  programId: PublicKey,
+): { source: PublicKey; destination: PublicKey; sourceExplicit: boolean; destinationExplicit: boolean } {
+  if (opts.sourceTokenAccount && opts.sourceOwner) {
+    throw new SolwalletError("sourceTokenAccount and sourceOwner are mutually exclusive.", {
+      code: "OPTION_CONFLICT",
+      hint: "sourceTokenAccount names the account directly; sourceOwner derives its ATA. Pass one.",
+    });
+  }
+  if (!opts.destinationTokenAccount && !opts.destination) {
+    throw new SolwalletError("A token transfer needs a destination owner or a destinationTokenAccount.", {
+      code: "DESTINATION_REQUIRED",
+    });
+  }
+  const sourceOwner = opts.sourceOwner ?? opts.payer;
+  return {
+    source: opts.sourceTokenAccount ?? getAssociatedTokenAddressSync(opts.mint, sourceOwner, true, programId),
+    destination:
+      opts.destinationTokenAccount ?? getAssociatedTokenAddressSync(opts.mint, opts.destination!, true, programId),
+    sourceExplicit: opts.sourceTokenAccount !== undefined,
+    destinationExplicit: opts.destinationTokenAccount !== undefined,
+  };
+}
 
 /**
  * Build the full instruction list for one transfer. `preloaded` lets a
@@ -195,9 +249,12 @@ export async function buildTransferInstructions(
         `${misused.join(", ")} is only valid for token transfers.`,
         {
           code: "OPTION_TOKEN_ONLY",
-          hint: "ataMode, instruction, fee, authority and sourceOwner apply to SPL / Token-2022 transfers; pass a mint or drop them.",
+          hint: "ataMode, instruction, fee, authority, sourceOwner, sourceTokenAccount and destinationTokenAccount apply to SPL / Token-2022 transfers; pass a mint or drop them.",
         },
       );
+    }
+    if (!opts.destination) {
+      throw new SolwalletError("A SOL transfer needs a destination.", { code: "DESTINATION_REQUIRED" });
     }
     if (opts.amount > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new SolwalletError("SOL amount exceeds safe integer lamports.", {
@@ -262,30 +319,50 @@ export async function buildTransferInstructions(
 
   const authority = opts.authority ?? opts.payer;
   const sourceOwner = opts.sourceOwner ?? opts.payer;
-  const sourceAta = await getAssociatedTokenAddress(
-    opts.mint,
-    sourceOwner,
-    true,
-    program.programId,
-  );
+  const resolved = resolveTransferTokenAccounts({ ...opts, mint: opts.mint }, program.programId);
+  if (resolved.destinationExplicit && (ataMode === "always-idempotent" || ataMode === "create")) {
+    throw new SolwalletError(
+      `destinationTokenAccount conflicts with ataMode "${ataMode}" — an explicit account is never created as an ATA.`,
+      {
+        code: "ATA_MODE_CONFLICT",
+        hint: 'Drop ataMode (or use "auto" / "none"), or pass a destination owner instead of destinationTokenAccount.',
+      },
+    );
+  }
+  const sourceAta = resolved.source;
   const sourceExists =
     preloaded.sourceExists ?? (await conn.connection.getAccountInfo(sourceAta)) !== null;
   if (!sourceExists) {
     throw new SolwalletError(
-      `${sourceOwner.equals(opts.payer) ? "Payer" : `Source owner ${sourceOwner.toBase58()}`} holds no token account for mint ${opts.mint.toBase58()}.`,
+      resolved.sourceExplicit
+        ? `Source token account ${sourceAta.toBase58()} does not exist.`
+        : `${sourceOwner.equals(opts.payer) ? "Payer" : `Source owner ${sourceOwner.toBase58()}`} holds no token account for mint ${opts.mint.toBase58()}.`,
       {
         code: "SOURCE_ATA_MISSING",
-        hint: "The wallet never received this token. Mint or receive it first, then transfer.",
+        hint: resolved.sourceExplicit
+          ? "Check the address and cluster; create it with createTokenAccount first."
+          : "The wallet never received this token. Mint or receive it first, then transfer.",
       },
     );
   }
 
-  // Destination ATA per ataMode. Existence is looked up (once) for every
-  // mode that may create it, so `destinationAtaCreated` reports what the
-  // transaction will really do; "none" never looks it up.
-  const destAta = await getAssociatedTokenAddress(opts.mint, opts.destination, true, program.programId);
+  // Destination per ataMode. Existence is looked up (once) for every mode
+  // that may create it, so `destinationAtaCreated` reports what the
+  // transaction will really do; "none" never looks it up. An explicit
+  // destination account is never created: it must already exist (checked
+  // unless ataMode is "none").
+  const destAta = resolved.destination;
   let destExists: boolean | null = preloaded.destinationExists ?? null;
-  if (destExists === null && ataMode !== "none") {
+  if (resolved.destinationExplicit) {
+    // ataMode "none" skips the lookup (lets callers provoke the on-chain error).
+    if (ataMode !== "none") destExists ??= (await conn.connection.getAccountInfo(destAta)) !== null;
+    if (destExists === false) {
+      throw new SolwalletError(`Destination token account ${destAta.toBase58()} does not exist.`, {
+        code: "DESTINATION_ACCOUNT_MISSING",
+        hint: "Create it first (createTokenAccount / create_token_account), or pass a destination owner to use its ATA.",
+      });
+    }
+  } else if (destExists === null && ataMode !== "none") {
     destExists = (await conn.connection.getAccountInfo(destAta)) !== null;
   }
   let createIx: { ix: TransactionInstruction; label: InstructionLabel } | undefined;
@@ -295,13 +372,15 @@ export async function buildTransferInstructions(
     ix: createAssociatedTokenAccountIdempotentInstruction(
       opts.payer,
       destAta,
-      opts.destination,
+      opts.destination!,
       opts.mint!,
       ataProgramId,
     ),
     label: "createAssociatedTokenAccountIdempotent",
   });
-  if (ataMode === "auto") {
+  if (resolved.destinationExplicit) {
+    // Explicit account: nothing to create.
+  } else if (ataMode === "auto") {
     if (destExists === false) {
       if (!allowAtaCreation) {
         throw new SolwalletError(
@@ -322,7 +401,7 @@ export async function buildTransferInstructions(
       ix: createAssociatedTokenAccountInstruction(
         opts.payer,
         destAta,
-        opts.destination,
+        opts.destination!,
         opts.mint,
         ataProgramId,
       ),
@@ -397,6 +476,11 @@ export async function buildTransferInstructions(
 export interface BuildTransferPlanOptions extends BuildTransferOptions {
   /** Reuse a blockhash instead of fetching one (deterministic plans in tests). */
   blockhash?: string;
+  /**
+   * Address lookup tables to compile the v0 message against. Fetched from
+   * the cluster (ALT_NOT_FOUND / ALT_DEACTIVATED when unusable).
+   */
+  lookupTables?: PublicKey[];
 }
 
 /**
@@ -411,7 +495,8 @@ export async function buildTransferPlan(
   const built = await buildTransferInstructions(conn, opts, preloaded);
   const blockhash =
     opts.blockhash ?? (await conn.connection.getLatestBlockhash("confirmed")).blockhash;
-  const { plan } = planFromInstructions(opts.payer, blockhash, built.instructions, built.labels);
+  const tables = opts.lookupTables?.length ? await fetchLookupTables(conn, opts.lookupTables) : [];
+  const { plan } = planFromInstructions(opts.payer, blockhash, built.instructions, built.labels, tables);
   return { built, plan };
 }
 

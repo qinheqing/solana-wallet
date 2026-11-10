@@ -282,6 +282,8 @@ export const en = {
   "preflight.ACCOUNT_FROZEN": "The source or destination token account is frozen; the freeze authority must thaw it first.",
   "preflight.NON_TRANSFERABLE": "The mint is non-transferable (soul-bound); tokens can only be burned.",
   "preflight.DEST_ATA_MISSING": "The destination has no token account yet; one will be created (rent paid by the payer) unless ataMode=none.",
+  "preflight.DESTINATION_ACCOUNT_MISSING": "The explicit destination token account does not exist; it is never created by a transfer.",
+  "preflight.TOKEN_ACCOUNT_MINT_MISMATCH": "An explicit token account belongs to a different mint.",
   "preflight.SOURCE_ATA_MISSING": "The sender has no token account for this mint, so there is nothing to send.",
   "preflight.INSUFFICIENT_TOKEN_BALANCE": "The source token account holds less than the requested amount.",
   "preflight.TRANSFER_FEE": "The mint charges a transfer fee; the recipient receives less than the sent amount.",

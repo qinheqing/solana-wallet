@@ -13,7 +13,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { ClusterConnection } from "../connection/connection.js";
-import { decodeRawTransaction, parseRawTransaction, sendRaw, signTransactionHex, simulateRaw } from "./raw.js";
+import { decodeRawTransaction, messageVersionOf, parseRawTransaction, sendRaw, signTransactionHex, simulateRaw } from "./raw.js";
 
 const payer = Keypair.generate();
 const second = Keypair.generate();
@@ -84,6 +84,21 @@ describe("decode / parse", () => {
     expect(() => decodeRawTransaction("")).toThrow(expect.objectContaining({ code: "RAW_TX_INVALID" }));
     expect(() => decodeRawTransaction("zz!!")).toThrow(expect.objectContaining({ code: "RAW_TX_INVALID" }));
     expect(() => parseRawTransaction("deadbeef")).toThrow(expect.objectContaining({ code: "RAW_TX_INVALID" }));
+  });
+
+  it("reports the message version without parsing", () => {
+    expect(messageVersionOf(Buffer.from(v0Hex(), "hex"))).toBe(0);
+    expect(messageVersionOf(Buffer.from(legacyHex(), "hex"))).toBe("legacy");
+    expect(messageVersionOf(new Uint8Array([2]))).toBeUndefined();
+  });
+
+  it("rejects a v1 message prefix with UNSUPPORTED_TX_VERSION", () => {
+    const bytes = Buffer.from(v0Hex(), "hex");
+    // 2 signatures: compact-u16 count (1 byte) + 2 × 64 bytes, then the prefix.
+    bytes[1 + 2 * 64] = 0x81;
+    expect(() => parseRawTransaction(bytes.toString("hex"))).toThrow(
+      expect.objectContaining({ code: "UNSUPPORTED_TX_VERSION", message: expect.stringContaining("version 1") }),
+    );
   });
 });
 

@@ -271,6 +271,8 @@ export const zh: Record<keyof typeof en, string> = {
   "preflight.ACCOUNT_FROZEN": "源或目标代币账户已被冻结，需由冻结权限先解冻。",
   "preflight.NON_TRANSFERABLE": "该 Mint 不可转让（灵魂绑定），代币只能销毁。",
   "preflight.DEST_ATA_MISSING": "目标尚无代币账户；除非 ataMode=none，否则将创建（租金由付款方承担）。",
+  "preflight.DESTINATION_ACCOUNT_MISSING": "指定的目标代币账户不存在；转账不会创建它。",
+  "preflight.TOKEN_ACCOUNT_MINT_MISMATCH": "指定的代币账户属于其他 mint。",
   "preflight.SOURCE_ATA_MISSING": "发送方没有该 Mint 的代币账户，无可发送余额。",
   "preflight.INSUFFICIENT_TOKEN_BALANCE": "源代币账户余额少于请求金额。",
   "preflight.TRANSFER_FEE": "该 Mint 收取转账手续费，接收方到账少于发送金额。",

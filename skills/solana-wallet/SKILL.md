@@ -1,13 +1,13 @@
 ---
 name: solana-wallet
-description: Solana 钱包与转账测试工具集（solwallet MCP server）。当用户提到 Solana 测试、devnet / testnet / localnet 操作、生成或导入测试钱包、领测试 SOL（airdrop / 水龙头）、SOL / SPL / Token-2022 转账测试、批量转账或空投模拟、混合多币转账、查钱包余额、交易 dry-run 模拟、创建代币 / Token-2022 扩展与运行时管理（铸造、销毁、费率、冻结、权限、元数据、MemoTransfer、费用提取）、代币预设模板、转账预检（transfer hook / memo / 冻结 / 费率）、只构造不发送（指令列表、message hex）、离线签名 / 模拟 / 发送外部交易、解析交易（代币流动、手续费、链上错误枚举名）、ATA 推导、mint / 代币账户观察、委托与 PermanentDelegate 划转、经 CPI 转发程序制造内层转账、Squads 多签（创建 / 提案 / 批准 / 执行）时使用。通过 33 个 MCP 工具执行，本 Skill 提供工具选择决策、参数约定、标准工作流、组合示例与错误自纠错规则。
+description: Solana 钱包与转账测试工具集（solwallet MCP server）。当用户提到 Solana 测试、devnet / testnet / localnet 操作、生成或导入测试钱包、领测试 SOL（airdrop / 水龙头）、SOL / SPL / Token-2022 转账测试、批量转账或空投模拟、混合多币转账、查钱包余额、交易 dry-run 模拟、创建代币 / Token-2022 扩展与运行时管理（铸造、销毁、费率、冻结、权限、元数据、MemoTransfer、费用提取）、代币预设模板、转账预检（transfer hook / memo / 冻结 / 费率）、只构造不发送（指令列表、message hex）、离线签名 / 模拟 / 发送外部交易、解析交易（代币流动、手续费、链上错误枚举名）、ATA 推导、mint / 代币账户观察、委托与 PermanentDelegate 划转、地址查找表（ALT）与 v0 交易、非 ATA 代币账户、经 CPI 转发程序制造内层转账、Squads 多签（创建 / 提案 / 批准 / 执行）时使用。通过 37 个 MCP 工具执行，本 Skill 提供工具选择决策、参数约定、标准工作流、组合示例与错误自纠错规则。
 ---
 
 # solana-wallet 使用手册
 
 给 AI 的操作规范。所有操作通过 solwallet MCP server 的工具完成；服务器默认连 devnet（`SOLWALLET_CLUSTER` 可改）。密钥只存在于服务器进程内存，重启即清空——这是测试工具，不是主网钱包。
 
-## 能力总览（33 个工具）
+## 能力总览（37 个工具）
 
 | 分组 | 工具 | 一句话 |
 |---|---|---|
@@ -22,6 +22,8 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 委托（2） | `approve_delegate` `revoke_delegate` | 普通 delegate 的授权 / 撤销；划转本身走 `transfer` |
 | CPI（1） | `cpi_token_transfer` | 经 `solwallet_cpi` 转发程序发 transferChecked，让代币流动成为**内层指令**（`inspect_transaction` 的 `isInner: true`）；程序需已部署 |
 | 代币（2） | `create_token` `manage_token2022` | 建 mint（7 个预设 + `mintTo`，SPL 可带 Metaplex 元数据）、21 个运行时动作 |
+| 账户（1） | `create_token_account` | 在任意（非 ATA）地址建代币账户：createAccount + InitializeAccount3，Token-2022 按 mint 扩展算空间 |
+| 地址查找表（3） | `create_lookup_table` `manage_lookup_table` `inspect_lookup_table` | ALT 创建（可带初始地址）/ 追加 / 停用 / 关闭 / 查看；`transfer` / `build_transfer` 用 `lookupTables` 编译带 ALT 的 v0 交易 |
 | 多签（5） | `create_multisig` `propose_multisig` `approve_multisig` `execute_multisig` `get_multisig` | Squads V4 |
 | 手册（1） | `get_guide` | 按主题读取本手册（MCP 内置，同内容），见下文各章节 |
 
@@ -52,7 +54,13 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 解析一笔交易到底转了多少、扣了多少、为什么失败 | `inspect_transaction` | `signature`（在线）或 `json`（离线，粘 getTransaction 结果）；`solMovements` / `solBalanceChanges` 是原生 SOL |
 | 看一笔序列化交易（signedTransaction，可能没上链）里有什么 | `inspect_raw_transaction` | `transaction` 传 base58 / base64 / hex；默认 `checkChain` 查是否上链与 blockhash 是否有效，`false` 纯离线；上链后用返回的 `signature` 调 `inspect_transaction` 看执行结果 |
 | 创建代币（SPL 或 Token-2022） | `create_token` | 给 `preset` 可省 `decimals`；`mintTo` 一步铸给指定钱包；返回 `mint` |
-| 铸造 / 销毁代币 | `manage_token2022` + `action: "mintTokens"` / `"burnTokens"` | SPL 与 Token-2022 通用；`params.amount` 和所有金额一样是 base units 整数串 |
+| 铸造 / 销毁代币 | `manage_token2022` + `action: "mintTokens"` / `"burnTokens"` | SPL 与 Token-2022 通用；`params.amount` 和所有金额一样是 base units 整数串；默认 burnChecked（`params.instruction: "burn"` 发旧式不校验指令） |
+| 销毁**别人**账户里的币（delegate / PermanentDelegate） | `manage_token2022` + `burnTokens` + `params.sourceOwner=<持有人>`（或 `params.sourceAccount=<代币账户>`） | 调用钱包作为销毁 authority 签名；持有人不签；二者互斥（`OPTION_CONFLICT`） |
+| 铸造到指定（非 ATA）代币账户 | `manage_token2022` + `mintTokens` + `params.destinationAccount` | 不派生也不创建 ATA；此时 `destinationOwner` 可省 |
+| 建一个非 ATA 的代币账户 | `create_token_account` | `owner` 默认调用钱包；返回 `address`，之后作为 `sourceTokenAccount` / `destinationTokenAccount` / `destinationAccount` / `sourceAccount` 使用 |
+| 从 / 向指定代币账户转账 | `transfer` / `build_transfer` + `sourceTokenAccount` / `destinationTokenAccount` | 不派生 ATA；给了 `destinationTokenAccount` 时 `to` 可省，且绝不创建目标账户 |
+| 建 / 维护地址查找表 | `create_lookup_table` → `manage_lookup_table`（extend / deactivate / close） | 每笔最多 20 个地址自动分块；新追加的地址**下一个 slot** 才可用；close 需先 deactivate 再等约 513 slot |
+| 发一笔带 ALT 的 v0 交易 | `transfer` / `build_transfer` + `lookupTables: [<表地址>]` | 表里有的非签名账户经表引用，见 `plan.addressTableLookups`；外部构造的 ALT 交易仍可走 `sign_transaction` → `send_transaction` |
 | 改费率 / 冻结解冻 / 换权限 / 改元数据 / 改显示倍率 / 改 hook 程序 | `manage_token2022` + 对应 `action` | 仅 Token-2022 mint；调用方钱包必须是对应 authority |
 | 让自己的收款账户强制要 memo | `manage_token2022` + `enableMemoTransfer` / `disableMemoTransfer` | 作用于**调用钱包自己的 ATA**（必要时自动创建并 realloc） |
 | 收转账费 | `find_withheld_accounts` → `manage_token2022` + `withdrawWithheldFromAccounts` / `harvestWithheldToMint` / `withdrawWithheldFromMint` | 先找出有扣留费的账户；`sources` 传代币**账户**地址，不是钱包地址 |
@@ -96,6 +104,9 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | `fee` | — | base units 整数串（和所有金额一样），必须等于 mint 当前档位算出的费，否则链上 `FeeMismatch`（预检 `FEE_MISMATCH` 直接拦截，`force` 可越过） |
 | `memo` | — | 在转账指令前插一条 Memo 程序指令；MemoTransfer 收款账户必需 |
 | `sourceOwner` | `walletName` 地址 | 源 ATA 的 owner 不是调用钱包时传（delegate / PermanentDelegate 划转） |
+| `sourceTokenAccount` | 派生 ATA | 直接指定源代币账户（ATA 或非 ATA）；与 `sourceOwner` 互斥（`OPTION_CONFLICT`） |
+| `destinationTokenAccount` | 派生 `to` 的 ATA | 直接指定目标代币账户；`to` 可省；不会创建（不存在 → `DESTINATION_ACCOUNT_MISSING`，`ataMode: "none"` 时不查链）；与 `ataMode` create / always-idempotent 冲突（`ATA_MODE_CONFLICT`） |
+| `lookupTables`（`transfer` / `build_transfer`） | 不用 | 地址查找表地址数组；v0 消息按表编译，`plan.addressTableLookups` 给出引用；表不存在 `ALT_NOT_FOUND`，已停用 `ALT_DEACTIVATED` |
 | `authorityWallet`（仅 `transfer`） / `authority`（`build` / `preflight`） | `walletName` | 签 transfer 指令的权限方不是付费钱包时传；`transfer` 需要那个钱包已加载并会被要求共同签名 |
 | `force`（仅 `transfer`） | `false` | 跳过 block 级预检直接发，让 validator 预检兜底；findings 仍随结果返回 |
 | `skipPreflight`（仅 `transfer`） | `false` | 完全不做本地预检（少几次 RPC 读），结果里没有 `preflight` |
@@ -146,6 +157,8 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | `FEE_MISMATCH` | block | `fee` ≠ 按当前 epoch 档位算出的费；链上必败 `FeeMismatch`（custom 32） | 用 `data.expectedFee` 替换 `fee`；要复现链上错误才 `force: true` |
 | `UNCHECKED_TRANSFER_REJECTED` | block | `instruction: "transfer"`（不校验）用在带 TransferFeeConfig / TransferHook 的 Token-2022 mint 上（`data.extension` 指出哪一个）；链上必败 `MintRequiredForTransfer`（custom 31） | 改回 `transferChecked`（或 `transferCheckedWithFee`）；要复现 custom 31 才 `force: true` |
 | `SCALED_UI_AMOUNT` | warn | mint 有 ScaledUiAmount；`amount` 是 raw，不会乘倍率 | 确认金额单位无误即可，无需动作 |
+| `TOKEN_ACCOUNT_MINT_MISMATCH` | block | 指定的 `sourceTokenAccount` / `destinationTokenAccount` 属于别的 mint | 核对账户地址与 mint |
+| `DESTINATION_ACCOUNT_MISSING` | block（`ataMode: "none"` 时 warn） | 指定的目标代币账户不存在；转账不会创建它 | 先 `create_token_account`，或改传 `to` 用 ATA |
 | `PREFLIGHT_INCOMPLETE` | warn | mint 或账户存在但无法解码，部分检查跳过 | 可继续发；失败时靠链上错误定位 |
 | `DEST_ATA_MISSING` | info | 目标 ATA 不存在；`data.ataMode` 说明会不会自动建 | 默认自动建（付费方出租金）；`ataMode: "none"` 则链上必败 |
 | `TRANSFER_FEE` | info | mint 收费：`data` 含 `tier`（older/newer）、`transferFeeBasisPoints`、`maximumFee`、`expectedFee`、`net` | 告诉用户到账 = `net`；需要精确声明时用 `transferCheckedWithFee` + `fee = expectedFee` |
@@ -406,6 +419,10 @@ get_multisig     { "multisigPda": "<pda>" }                                     
 | `MINT_NOT_FOUND` | 预检 / 构造时 mint 在该集群不存在 | 核对 `cluster` 与 mint 地址 |
 | `SIGNER_MISSING` | 交易需要 `authority` 的签名但没提供 | `transfer` 传 `authorityWallet`，或把 authority 改成 `walletName` |
 | `SIGNER_NOT_REQUIRED` / `TX_NOT_FULLY_SIGNED` | 原始交易通道：钱包不是必需签名者 / 还有签名槽为空 | 核对 `plan.signers`；补签后再 `send_transaction` |
+| `OPTION_CONFLICT` | 互斥参数同时出现（`sourceTokenAccount` + `sourceOwner`、`sourceAccount` + `sourceOwner`） | 只留一个 |
+| `DESTINATION_REQUIRED` | 既没给 `to` 也没给 `destinationTokenAccount`（铸造：`destinationOwner` / `destinationAccount`） | 补其一 |
+| `ALT_NOT_FOUND` / `ALT_DEACTIVATED` | 查找表不存在 / 已停用 | 核对 cluster 与表地址；停用的表换新表 |
+| `UNSUPPORTED_TX_VERSION` | 序列化交易的 message 版本既不是 legacy 也不是 v0（`message` 里给出版本号） | 本钱包只支持 legacy / v0；让构造方改用 v0 |
 | `OWNER_OFF_CURVE` | `derive_address` 的 owner 是 PDA | 确认确实要给 PDA 算 ATA 才传 `allowOwnerOffCurve: true` |
 | `MAINNET_NOT_ALLOWED` | 主网操作未确认 | 向用户确认后加 `allowMainnet: true` 重发 |
 | `AIRDROP_NOT_SUPPORTED` | mainnet 上请求 airdrop | 主网只能转账充值，不要重试 |

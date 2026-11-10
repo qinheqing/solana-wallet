@@ -32,6 +32,7 @@ import bs58 from "bs58";
 
 import type { ClusterConnection } from "../connection/connection.js";
 import { SolwalletError } from "../connection/errors.js";
+import { messageVersionOf } from "../transfer/raw.js";
 
 export type SignedTxEncoding = "base58" | "base64" | "hex";
 
@@ -167,7 +168,13 @@ export function parseSignedTransaction(input: string): { tx: VersionedTransactio
     });
   }
   let lastError: unknown = null;
+  let unsupported: { version: number; encoding: SignedTxEncoding } | undefined;
   for (const c of candidates(input)) {
+    const version = messageVersionOf(c.bytes);
+    if (typeof version === "number" && version !== 0) {
+      unsupported ??= { version, encoding: c.encoding };
+      continue;
+    }
     try {
       const tx = VersionedTransaction.deserialize(c.bytes);
       // A strict round-trip rejects garbage that happens to parse with trailing bytes.
@@ -176,6 +183,15 @@ export function parseSignedTransaction(input: string): { tx: VersionedTransactio
     } catch (e) {
       lastError = e;
     }
+  }
+  if (unsupported) {
+    throw new SolwalletError(
+      `Unsupported transaction message version ${unsupported.version} (${unsupported.encoding} input) — only legacy and v0 can be decoded.`,
+      {
+        code: "UNSUPPORTED_TX_VERSION",
+        hint: `The message prefix byte declares version ${unsupported.version}; this wallet decodes legacy and v0 transactions only.`,
+      },
+    );
   }
   throw new SolwalletError(
     `Could not decode a transaction from the input${lastError ? `: ${lastError instanceof Error ? lastError.message : String(lastError)}` : " (not base58, base64 or hex)"}.`,

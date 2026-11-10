@@ -10,14 +10,19 @@
  * yields a PREFLIGHT_INCOMPLETE warning instead of an exception — the
  * validator's own preflight remains the backstop.
  */
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey, type AccountInfo } from "@solana/web3.js";
 
 import type { ClusterConnection } from "../connection/connection.js";
 import { SolwalletError } from "../connection/errors.js";
 import { decodeTokenAccount, type TokenAccountInspection } from "../inspect/account.js";
 import { decodeMintAccount, type MintInspection, type TransferFeeView } from "../inspect/mint.js";
-import type { AtaMode, BuildTransferOptions, PreloadedTransferAccounts, TransferInstructionKind } from "./build.js";
+import {
+  resolveTransferTokenAccounts,
+  type AtaMode,
+  type BuildTransferOptions,
+  type PreloadedTransferAccounts,
+  type TransferInstructionKind,
+} from "./build.js";
 import { mintProgramFromOwner, type TokenProgramKind } from "./program.js";
 
 export type PreflightSeverity = "block" | "warn" | "info";
@@ -39,6 +44,8 @@ export type PreflightCode =
   | "DELEGATE_TRANSFER"
   | "INSUFFICIENT_DELEGATED_AMOUNT"
   | "AUTHORITY_NOT_DELEGATE"
+  | "DESTINATION_ACCOUNT_MISSING"
+  | "TOKEN_ACCOUNT_MINT_MISMATCH"
   | "PREFLIGHT_INCOMPLETE";
 
 export interface PreflightFinding {
@@ -77,16 +84,18 @@ export interface PreflightContext {
   epoch?: number | bigint;
 }
 
-/** Derive source/destination ATAs exactly as buildTransferInstructions does. */
+/**
+ * Resolve the source/destination token accounts exactly as
+ * buildTransferInstructions does: explicit sourceTokenAccount /
+ * destinationTokenAccount win, otherwise the derived ATAs. (Field names keep
+ * "Ata" for compatibility; they hold whichever account is used.)
+ */
 export function resolveTransferAtas(
   opts: BuildTransferOptions & { mint: PublicKey },
   programId: PublicKey,
 ): { sourceAta: PublicKey; destinationAta: PublicKey } {
-  const sourceOwner = opts.sourceOwner ?? opts.payer;
-  return {
-    sourceAta: getAssociatedTokenAddressSync(opts.mint, sourceOwner, true, programId),
-    destinationAta: getAssociatedTokenAddressSync(opts.mint, opts.destination, true, programId),
-  };
+  const r = resolveTransferTokenAccounts(opts, programId);
+  return { sourceAta: r.source, destinationAta: r.destination };
 }
 
 /** Token-2022 fee rule: ceil(amount * bps / 10_000), capped at maximumFee. */
@@ -184,7 +193,7 @@ export function evaluatePreflight(ctx: PreflightContext): PreflightResult {
       data: { account: destinationAta.toBase58(), role: "destination" },
     });
   }
-  const willCreateDest = destAccount === null && ataMode !== "none";
+  const willCreateDest = destAccount === null && ataMode !== "none" && !opts.destinationTokenAccount;
   const defaultState = findExt(mint, "DefaultAccountState");
   if (willCreateDest && defaultState?.state === "frozen") {
     findings.push({
@@ -206,7 +215,14 @@ export function evaluatePreflight(ctx: PreflightContext): PreflightResult {
   }
 
   // --- destination presence --------------------------------------------------
-  if (destAccount === null) {
+  if (destAccount === null && opts.destinationTokenAccount) {
+    findings.push({
+      code: "DESTINATION_ACCOUNT_MISSING",
+      severity: ataMode === "none" ? "warn" : "block",
+      message: `Destination token account ${destinationAta.toBase58()} does not exist; an explicit destination account is never created by the transfer.`,
+      data: { account: destinationAta.toBase58(), ataMode },
+    });
+  } else if (destAccount === null) {
     const allowAtaCreation = opts.allowAtaCreation ?? true;
     const note =
       ataMode === "none"
@@ -293,7 +309,9 @@ export function evaluatePreflight(ctx: PreflightContext): PreflightResult {
     findings.push({
       code: "SOURCE_ATA_MISSING",
       severity: "block",
-      message: `Source token account ${sourceAta.toBase58()} does not exist — the owner never received this token.`,
+      message: opts.sourceTokenAccount
+        ? `Source token account ${sourceAta.toBase58()} does not exist.`
+        : `Source token account ${sourceAta.toBase58()} does not exist — the owner never received this token.`,
       data: { sourceAta: sourceAta.toBase58(), sourceOwner: (opts.sourceOwner ?? opts.payer).toBase58() },
     });
   } else if (sourceAccount && BigInt(sourceAccount.amount) < amount) {
@@ -305,8 +323,28 @@ export function evaluatePreflight(ctx: PreflightContext): PreflightResult {
     });
   }
 
+  // --- explicit accounts must belong to this mint ----------------------------------
+  for (const [role, acct, explicit] of [
+    ["source", sourceAccount, opts.sourceTokenAccount],
+    ["destination", destAccount, opts.destinationTokenAccount],
+  ] as const) {
+    if (explicit && acct && acct.mint !== mint.address) {
+      findings.push({
+        code: "TOKEN_ACCOUNT_MINT_MISMATCH",
+        severity: "block",
+        message: `${role === "source" ? "Source" : "Destination"} token account ${acct.address} holds mint ${acct.mint}, not ${mint.address}.`,
+        data: { account: acct.address, role, accountMint: acct.mint, mint: mint.address },
+      });
+    }
+  }
+
   // --- authority ≠ source owner: delegate / permanent delegate (T-H) --------------
-  const effectiveOwner = opts.sourceOwner ?? opts.payer;
+  // With an explicit source account the owner is whatever the chain says.
+  const effectiveOwner = opts.sourceTokenAccount
+    ? sourceAccount
+      ? new PublicKey(sourceAccount.owner)
+      : opts.payer
+    : (opts.sourceOwner ?? opts.payer);
   const authority = opts.authority ?? opts.payer;
   if (!authority.equals(effectiveOwner)) {
     const permanent = findExt(mint, "PermanentDelegate")?.delegate ?? null;
@@ -356,6 +394,8 @@ export function evaluatePreflight(ctx: PreflightContext): PreflightResult {
   if (ataMode !== "auto") deviations.ataMode = ataMode;
   if (opts.authority && !opts.authority.equals(opts.payer)) deviations.authority = opts.authority.toBase58();
   if (opts.sourceOwner && !opts.sourceOwner.equals(opts.payer)) deviations.sourceOwner = opts.sourceOwner.toBase58();
+  if (opts.sourceTokenAccount) deviations.sourceTokenAccount = opts.sourceTokenAccount.toBase58();
+  if (opts.destinationTokenAccount) deviations.destinationTokenAccount = opts.destinationTokenAccount.toBase58();
   if (Object.keys(deviations).length > 0) {
     findings.push({
       code: "NON_STANDARD_CONSTRUCTION",

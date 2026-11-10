@@ -78,6 +78,7 @@ function makeFakeConnectionFactory() {
       value: [{ slot: 1001, confirmations: 1, err: null, confirmationStatus: "confirmed" }],
     }),
     isBlockhashValid: vi.fn().mockResolvedValue({ context: { slot: 1001 }, value: true }),
+    getAddressLookupTable: vi.fn().mockResolvedValue({ context: { slot: 1001 }, value: null }),
   };
 
   // The ConnectionManager expects a ClusterConnection — wrap the fake RPC
@@ -155,6 +156,11 @@ const TOOL_NAMES = [
   "inspect_raw_transaction",
   // built-in usage guide
   "get_guide",
+  // wallet primitives: lookup tables + non-ATA token accounts
+  "create_lookup_table",
+  "manage_lookup_table",
+  "inspect_lookup_table",
+  "create_token_account",
 ];
 
 describe("solwallet MCP server (11.6)", () => {
@@ -1491,6 +1497,121 @@ describe("built-in usage guide (no Skill install needed)", () => {
     expect(uris).toContain("solwallet://guide/preflight-codes");
     const read = await t.client.readResource({ uri: "solwallet://guide/errors" });
     expect((read.contents[0] as { text: string }).text).toMatch(/^## 错误处理/);
+    await t.cleanup();
+  });
+});
+
+// --- wallet primitives: lookup tables + non-ATA token accounts ----------------
+describe("lookup tables + token accounts", () => {
+  it("create_lookup_table dryRun returns a table address and one simulated create", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const res = await t.call("create_lookup_table", {
+      walletName: "w",
+      addresses: [Keypair.generate().publicKey.toBase58()],
+      dryRun: true,
+    });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(t.text(res));
+    expect(body.ok).toBe(true);
+    expect(body.table).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    expect(body.transactions).toHaveLength(1);
+    expect(body.transactions[0].step).toBe("create+extend(1)");
+    expect(body.transactions[0].simulatedOnly).toBe(true);
+    expect(t.rpc.fake.getSlot).toHaveBeenCalledWith("finalized");
+    await t.cleanup();
+  });
+
+  it("manage_lookup_table extend without addresses → ALT_ADDRESSES_REQUIRED", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const res = await t.call("manage_lookup_table", {
+      walletName: "w",
+      table: Keypair.generate().publicKey.toBase58(),
+      action: "extend",
+    });
+    expect(res.isError).toBe(true);
+    expect(t.text(res)).toContain("ALT_ADDRESSES_REQUIRED");
+    await t.cleanup();
+  });
+
+  it("inspect_lookup_table / build_transfer with an unknown table → ALT_NOT_FOUND", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const table = Keypair.generate().publicKey.toBase58();
+    const inspected = await t.call("inspect_lookup_table", { table });
+    expect(inspected.isError).toBe(true);
+    expect(t.text(inspected)).toContain("ALT_NOT_FOUND");
+    const built = await t.call("build_transfer", {
+      walletName: "w",
+      to: Keypair.generate().publicKey.toBase58(),
+      amount: "1000",
+      lookupTables: [table],
+    });
+    expect(built.isError).toBe(true);
+    expect(t.text(built)).toContain("ALT_NOT_FOUND");
+    await t.cleanup();
+  });
+
+  it("create_token_account dryRun sizes an SPL account and returns its address", async () => {
+    const t = await setup();
+    t.rpc.fake.getAccountInfo.mockImplementation((addr: PublicKey) =>
+      Promise.resolve(addr.equals(t.rpc.mint) ? { owner: TOKEN_PROGRAM_ID, data: mintBase({ decimals: 6 }) } : null),
+    );
+    await t.call("create_wallet", { name: "w" });
+    const owner = Keypair.generate().publicKey.toBase58();
+    const res = await t.call("create_token_account", {
+      walletName: "w",
+      mint: t.rpc.mint.toBase58(),
+      owner,
+      dryRun: true,
+    });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(t.text(res));
+    expect(body).toMatchObject({ ok: true, owner, program: "spl-token", space: 165, simulatedOnly: true });
+    expect(body.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    expect(body.rentDisplay).toContain("SOL");
+    await t.cleanup();
+  });
+
+  it("build_transfer with destinationTokenAccount and no `to` targets that account", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const listed = JSON.parse(t.text(await t.call("list_wallets", {})));
+    const payer = new PublicKey(listed.wallets[0].address);
+    const ownAta = getAssociatedTokenAddressSync(t.rpc.mint, payer, true, TOKEN_PROGRAM_ID);
+    const dest = Keypair.generate().publicKey;
+    t.rpc.fake.getAccountInfo.mockImplementation((addr: PublicKey) => {
+      if (addr.equals(t.rpc.mint)) return Promise.resolve({ owner: TOKEN_PROGRAM_ID, data: mintBase({ decimals: 6 }) });
+      if (addr.equals(ownAta) || addr.equals(dest)) return Promise.resolve({ owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(0) });
+      return Promise.resolve(null);
+    });
+    const res = await t.call("build_transfer", {
+      walletName: "w",
+      mint: t.rpc.mint.toBase58(),
+      amount: "5",
+      decimals: 6,
+      destinationTokenAccount: dest.toBase58(),
+    });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(t.text(res));
+    expect(body.labels).toEqual(["transferChecked"]);
+    expect(body.destinationAta).toBe(dest.toBase58());
+    expect(body.plan.instructions[0].accounts[2].pubkey).toBe(dest.toBase58());
+    await t.cleanup();
+  });
+
+  it("manage_token2022 burnTokens rejects an unknown instruction variant", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "w" });
+    const res = await t.call("manage_token2022", {
+      walletName: "w",
+      mint: t.rpc.mint.toBase58(),
+      action: "burnTokens",
+      params: { amount: "1", instruction: "nope" },
+    });
+    expect(res.isError).toBe(true);
+    expect(t.text(res)).toContain("burnChecked");
     await t.cleanup();
   });
 });
