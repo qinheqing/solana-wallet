@@ -206,7 +206,9 @@ describe("inspect tools (T-A / T-E) e2e", () => {
     const neither = await t.call("inspect_transaction", {});
     expect(neither.isError).toBe(true);
     expect(t.body(neither).error.code).toBe("INVALID_INPUT");
-    const unknown = await t.call("inspect_transaction", { signature: "nope" });
+    const unknown = await t.call("inspect_transaction", {
+      signature: "dGu577XYHRcJRg763xnSBKgafeBwxHPWg9DxcGAexzWJ6DL8VtmnGmKqTTeAKjDszkiT6W2wCq45avs4sNC1be9",
+    });
     expect(t.body(unknown).error.code).toBe("TRANSACTION_NOT_FOUND");
   });
 });

@@ -8,7 +8,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { resolveClusterTarget } from "../connection/cluster.js";
 import { ClusterConnection } from "../connection/connection.js";
-import { explorerUrl, inspectParsedTransaction, inspectTransaction } from "./transaction.js";
+import bs58 from "bs58";
+
+import { explorerUrl, inspectParsedTransaction, inspectTransaction, resolveSignature } from "./transaction.js";
 
 const fixture = (name: string): unknown =>
   JSON.parse(readFileSync(new URL(`./__fixtures__/${name}.json`, import.meta.url), "utf8"));
@@ -209,13 +211,14 @@ describe("inspectTransaction — plumbing", () => {
 
   it("signature variant fetches with maxSupportedTransactionVersion 0 then delegates; TRANSACTION_NOT_FOUND", async () => {
     const json = fixture("transfer-checked-spl");
+    const SIG_A = "4UybrykVtyeBy3H4Ghz3PPG1sxp6EgzbhshvAnRiaNqucvjwSvheWzXTRiYqirQ63DVraELAUz3EfeCti2cuuE1u";
     const fake = { getParsedTransaction: vi.fn().mockResolvedValueOnce(json).mockResolvedValueOnce(null) };
     const conn = new ClusterConnection(resolveClusterTarget("devnet"), { connection: fake as never });
-    const r = await inspectTransaction({ conn, signature: "LPUe" });
-    expect(fake.getParsedTransaction).toHaveBeenCalledWith("LPUe", { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+    const r = await inspectTransaction({ conn, signature: SIG_A });
+    expect(fake.getParsedTransaction).toHaveBeenCalledWith(SIG_A, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
     expect(r.movements).toHaveLength(1);
     expect(r.explorerUrl).toContain("?cluster=devnet");
-    await expect(inspectTransaction({ conn, signature: "nope" })).rejects.toMatchObject({ code: "TRANSACTION_NOT_FOUND" });
+    await expect(inspectTransaction({ conn, signature: SIG_A })).rejects.toMatchObject({ code: "TRANSACTION_NOT_FOUND" });
   });
 
   it("explorerUrl forms", () => {
@@ -251,3 +254,37 @@ describe("native SOL", () => {
   });
 });
 
+describe("resolveSignature", () => {
+  // Serialized (signed, legacy) transaction pasted where a signature was expected —
+  // getTransaction rejects it with "-32602 Invalid param: WrongSize".
+  const RAW_TX_B58 =
+    "4HyFMSaVAQo5ZRVzZqJD5TNLk3tGxuv31AfonYmyHfQG2VUY7fuzM2LPZb7DYEd7ECneBgoSbQQq3fkuCMrXkLVCbBkKZjeuhnCokj9YFTDuhLtwdn9pYdVy6hjP9JgtjkbnjwF699riqBgca7vENPu2YfAxpNwxByHbDKTHzfonETwZ7RENFygGcUCABWpBeBJ4vE5fj1Jf33c5T9LYnTgDrfN2TTehgawcw9NBay9fFn6kNEiRsKoQzdAPSrwVF4D4xFbdm3r9M6qQpFfezi1Z9gbXCc6L5a8612KMRTDPVQ5Hv3cerFVxVVbshEdPEgSnbc4vPfqbsjG73KT5wUdbYNSEF9u8JQxmDEFqEvxF";
+  const SIG = "dGu577XYHRcJRg763xnSBKgafeBwxHPWg9DxcGAexzWJ6DL8VtmnGmKqTTeAKjDszkiT6W2wCq45avs4sNC1be9";
+
+  it("passes a real signature through (trimmed)", () => {
+    expect(resolveSignature(`  ${SIG}\n`)).toBe(SIG);
+  });
+
+  it("extracts the fee-payer signature from a base58 serialized transaction", () => {
+    expect(resolveSignature(RAW_TX_B58)).toBe(SIG);
+  });
+
+  it("extracts it from a base64 serialized transaction too", () => {
+    const b64 = Buffer.from(bs58.decode(RAW_TX_B58)).toString("base64");
+    expect(resolveSignature(b64)).toBe(SIG);
+  });
+
+  it("rejects garbage with INVALID_SIGNATURE", () => {
+    expect(() => resolveSignature("abc")).toThrow(expect.objectContaining({ code: "INVALID_SIGNATURE" }));
+    expect(() => resolveSignature("")).toThrow(expect.objectContaining({ code: "INVALID_SIGNATURE" }));
+  });
+
+  it("inspectTransaction queries RPC with the extracted signature", async () => {
+    const fake = { getParsedTransaction: vi.fn().mockResolvedValue(null) };
+    const conn = new ClusterConnection(resolveClusterTarget("devnet"), { connection: fake as never });
+    await expect(inspectTransaction({ conn, signature: RAW_TX_B58 })).rejects.toMatchObject({
+      code: "TRANSACTION_NOT_FOUND",
+    });
+    expect(fake.getParsedTransaction.mock.calls[0]?.[0]).toBe(SIG);
+  });
+});

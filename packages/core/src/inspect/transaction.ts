@@ -7,6 +7,8 @@
  * (maxSupportedTransactionVersion: 0) or delegates for a supplied JSON.
  */
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { VersionedTransaction } from "@solana/web3.js";
+import bs58 from "bs58";
 
 import type { Cluster } from "../connection/cluster.js";
 import type { ClusterConnection } from "../connection/connection.js";
@@ -524,12 +526,65 @@ export function inspectParsedTransaction(
   };
 }
 
+/**
+ * Normalise what the user pasted into a base58 transaction signature.
+ *
+ * A signature is 64 bytes (87–88 base58 chars). People often paste the
+ * serialized transaction instead (wallet / explorer "raw tx" output, base58
+ * or base64); sending that to getTransaction fails with
+ * `-32602 Invalid param: WrongSize`. When the input deserializes as a
+ * transaction, its first signature (the fee payer's, which is the tx id) is
+ * used instead.
+ */
+export function resolveSignature(input: string): string {
+  const raw = input.trim();
+  const invalid = (detail: string) =>
+    new SolwalletError(`Not a transaction signature: ${detail}`, {
+      code: "INVALID_SIGNATURE",
+      hint: "Paste the 64-byte base58 transaction signature (87–88 characters), or a serialized transaction (base58/base64) to extract it from.",
+    });
+  if (!raw) throw invalid("empty input.");
+
+  const candidates: Uint8Array[] = [];
+  try {
+    candidates.push(bs58.decode(raw));
+  } catch {
+    /* not base58 */
+  }
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(raw) && raw.length % 4 === 0) {
+    candidates.push(Uint8Array.from(Buffer.from(raw, "base64")));
+  }
+  if (candidates[0]?.length === 64) return raw;
+
+  for (const bytes of candidates) {
+    if (bytes.length <= 64) continue;
+    let tx: VersionedTransaction;
+    try {
+      tx = VersionedTransaction.deserialize(bytes);
+    } catch {
+      continue;
+    }
+    const first = tx.signatures[0];
+    if (!first || first.every((b) => b === 0)) {
+      throw invalid("the input is a serialized transaction that has not been signed, so it has no signature to look up.");
+    }
+    return bs58.encode(first);
+  }
+  const len = candidates[0]?.length;
+  throw invalid(
+    len === undefined
+      ? "input is neither base58 nor base64."
+      : `decoded to ${len} bytes (expected 64) and is not a serialized transaction.`,
+  );
+}
+
 /** Fetch by signature (or take JSON) and inspect. */
 export async function inspectTransaction(input: InspectTransactionInput): Promise<TransactionInspection> {
   if ("json" in input) {
     return inspectParsedTransaction(input.json, { cluster: input.cluster, rpcUrl: input.rpcUrl });
   }
-  const { conn, signature } = input;
+  const { conn } = input;
+  const signature = resolveSignature(input.signature);
   const tx = await conn.connection.getParsedTransaction(signature, {
     maxSupportedTransactionVersion: 0,
     commitment: "confirmed",
