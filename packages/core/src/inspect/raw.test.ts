@@ -72,6 +72,17 @@ describe("decodeSignedTransaction", () => {
     expect(r.warnings.join("\n")).toMatch(/does NOT verify/);
   });
 
+  it("rejects a v1 message prefix with UNSUPPORTED_TX_VERSION", () => {
+    const bytes = Buffer.from(bs58.decode(RAW_B58));
+    const sigCount = bytes[0]!; // < 128 → single-byte compact-u16
+    bytes[1 + sigCount * 64] = 0x81;
+    for (const input of [bs58.encode(bytes), bytes.toString("base64"), bytes.toString("hex")]) {
+      expect(() => decodeSignedTransaction(input)).toThrow(
+        expect.objectContaining({ code: "UNSUPPORTED_TX_VERSION", message: expect.stringContaining("version 1") }),
+      );
+    }
+  });
+
   it("rejects a bare signature and garbage with RAW_TX_INVALID", () => {
     expect(() => decodeSignedTransaction(SIG)).toThrow(expect.objectContaining({ code: "RAW_TX_INVALID" }));
     expect(() => decodeSignedTransaction("not a tx!")).toThrow(expect.objectContaining({ code: "RAW_TX_INVALID" }));

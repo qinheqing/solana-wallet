@@ -62,7 +62,7 @@ export function registerTransferTools(
         "Send a single transfer: native SOL (omit mint) or SPL/Token-2022 tokens (provide mint; decimals optional, read from the mint when omitted). `amount` is BASE UNITS (lamports / token base units). Auto-creates the destination token account unless allowAtaCreation=false. Runs preflight_transfer first: block-level findings (transfer hook, memo required, frozen, non-transferable, insufficient balance, authority not a delegate, fee mismatch, unchecked transfer on a fee/hook mint) return error.code=PREFLIGHT_BLOCKED with `preflight.findings` instead of sending — pass force=true to send anyway. Returns signature, slot, fee, plan and preflight; on-chain rejections come back in-band as `error` with `custom` {code, name, programId} (e.g. 36 NoMemo) next to plan and preflight. Delegate / PermanentDelegate transfer (moving another owner's tokens): walletName = the delegate wallet (pays fees and signs as authority), sourceOwner = the owner address whose token account is the source; the owner does NOT sign. Use approve_delegate first for a regular delegate; a Token-2022 PermanentDelegate needs no approval.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet paying fees. It is also the source owner and transfer authority unless sourceOwner / authorityWallet override them."),
-        to: z.string().describe("Recipient address (wallet address for tokens; their ATA is derived automatically)."),
+        to: z.string().optional().describe("Recipient address (wallet address for tokens; their ATA is derived automatically). Optional only for token transfers that pass destinationTokenAccount."),
         amount: baseUnitParam(z, "Amount to send"),
         mint: z.string().optional().describe("Token mint address. Omit for native SOL."),
         decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
@@ -71,6 +71,9 @@ export function registerTransferTools(
         allowMainnet: z.literal(true).optional().describe("Required literal true to send on mainnet-beta."),
         cluster: clusterParam(z, deps),
         ...constructionKnobs(z),
+        lookupTables: z.array(z.string()).optional().describe(
+          "Address lookup table addresses to compile the v0 message against (create one with create_lookup_table). Non-signer accounts found in a table are referenced through it (plan.addressTableLookups). Unknown → ALT_NOT_FOUND, deactivated → ALT_DEACTIVATED.",
+        ),
         authorityWallet: z.string().optional().describe(
           "Loaded wallet name that signs the token transfer as authority when it is NOT walletName — e.g. walletName pays the fee while the owner (authorityWallet = owner, sourceOwner = owner address) or a delegate signs. Its keypair co-signs the transaction. Not needed when walletName itself is the delegate.",
         ),
@@ -82,7 +85,7 @@ export function registerTransferTools(
         ),
       },
     },
-    run(async (args: SendOptions & TransferArgs & KnobArgs & { authorityWallet?: string; force?: boolean; skipPreflight?: boolean }) => {
+    run(async (args: SendOptions & TransferArgs & KnobArgs & { authorityWallet?: string; force?: boolean; skipPreflight?: boolean; lookupTables?: string[] }) => {
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
       const authority = args.authorityWallet ? resolveFrom(deps, args.authorityWallet) : undefined;
@@ -109,6 +112,9 @@ export function registerTransferTools(
         fee: options.fee,
         authority: authority?.publicKey,
         sourceOwner: options.sourceOwner,
+        sourceTokenAccount: options.sourceTokenAccount,
+        destinationTokenAccount: options.destinationTokenAccount,
+        lookupTables: args.lookupTables,
         memo: options.memo,
         extraSigners: authority ? [authority] : [],
         force: args.force,
@@ -140,10 +146,10 @@ export function registerTransferTools(
     "preflight_transfer",
     {
       description:
-        "Check a transfer BEFORE sending, without signing or building: reads the mint and both token accounts and returns {ok, findings[]} where each finding has code, severity (block | warn | info), message, data. Block codes: TRANSFER_HOOK_PRESENT, MEMO_REQUIRED, ACCOUNT_FROZEN, NON_TRANSFERABLE, SOURCE_ATA_MISSING, INSUFFICIENT_TOKEN_BALANCE, INSUFFICIENT_DELEGATED_AMOUNT, AUTHORITY_NOT_DELEGATE, FEE_MISMATCH (fee ≠ expected → FeeMismatch 32 on chain), UNCHECKED_TRANSFER_REJECTED (instruction=transfer on a Token-2022 mint with TransferFeeConfig/TransferHook → MintRequiredForTransfer 31). Warn: SCALED_UI_AMOUNT, PREFLIGHT_INCOMPLETE. Info: DEST_ATA_MISSING, TRANSFER_FEE (expected fee + net by current epoch), NON_STANDARD_CONSTRUCTION. Same inputs as build_transfer; SOL transfers are always ok. ok=false flags isError so the result is not mistaken for a green light.",
+        "Check a transfer BEFORE sending, without signing or building: reads the mint and both token accounts and returns {ok, findings[]} where each finding has code, severity (block | warn | info), message, data. Block codes: TRANSFER_HOOK_PRESENT, MEMO_REQUIRED, ACCOUNT_FROZEN, NON_TRANSFERABLE, SOURCE_ATA_MISSING, INSUFFICIENT_TOKEN_BALANCE, INSUFFICIENT_DELEGATED_AMOUNT, AUTHORITY_NOT_DELEGATE, FEE_MISMATCH (fee ≠ expected → FeeMismatch 32 on chain), UNCHECKED_TRANSFER_REJECTED (instruction=transfer on a Token-2022 mint with TransferFeeConfig/TransferHook → MintRequiredForTransfer 31). TOKEN_ACCOUNT_MINT_MISMATCH and DESTINATION_ACCOUNT_MISSING (explicit token accounts). Warn: SCALED_UI_AMOUNT, PREFLIGHT_INCOMPLETE. Info: DEST_ATA_MISSING, TRANSFER_FEE (expected fee + net by current epoch), NON_STANDARD_CONSTRUCTION. Same inputs as build_transfer; SOL transfers are always ok. ok=false flags isError so the result is not mistaken for a green light.",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet used as fee payer (and default source owner / authority)."),
-        to: z.string().describe("Recipient address (wallet address for tokens; their ATA is derived automatically)."),
+        to: z.string().optional().describe("Recipient address (wallet address for tokens; their ATA is derived automatically). Optional only for token transfers that pass destinationTokenAccount."),
         amount: baseUnitParam(z, "Amount to send"),
         mint: z.string().optional().describe("Token mint address. Omit for native SOL (always ok)."),
         decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
@@ -184,10 +190,10 @@ export function registerTransferTools(
     "build_transfer",
     {
       description:
-        "Construct a transfer transaction WITHOUT signing or sending and return its TransactionPlan: every instruction (label, programId, accounts, dataHex), the serialized v0 message hex, estimated wire bytes, required signers and the blockhash. Accepts the same construction knobs as `transfer` (computeUnitLimit/Price, ataMode, instruction, fee, memo, authority, sourceOwner) — non-default values intentionally produce NON-STANDARD transactions for integration testing. Use it to inspect or hand a payload to an external signer (see sign_transaction / send_transaction).",
+        "Construct a transfer transaction WITHOUT signing or sending and return its TransactionPlan: every instruction (label, programId, accounts, dataHex), the serialized v0 message hex, estimated wire bytes, required signers and the blockhash. Accepts the same construction knobs as `transfer` (computeUnitLimit/Price, ataMode, instruction, fee, memo, authority, sourceOwner, sourceTokenAccount, destinationTokenAccount) plus lookupTables (v0 message compiled against address lookup tables) — non-default values intentionally produce NON-STANDARD transactions for integration testing. Use it to inspect or hand a payload to an external signer (see sign_transaction / send_transaction).",
       inputSchema: {
         walletName: z.string().describe("Loaded wallet used as fee payer (and default source owner / authority)."),
-        to: z.string().describe("Recipient address (wallet address for tokens; their ATA is derived automatically)."),
+        to: z.string().optional().describe("Recipient address (wallet address for tokens; their ATA is derived automatically). Optional only for token transfers that pass destinationTokenAccount."),
         amount: baseUnitParam(z, "Amount to send"),
         mint: z.string().optional().describe("Token mint address. Omit for native SOL."),
         decimals: z.number().int().min(0).max(18).optional().describe(DECIMALS_OPTIONAL_DESC),
@@ -197,9 +203,12 @@ export function registerTransferTools(
         authority: z.string().optional().describe(
           "Address that will sign the token transfer as authority when it is NOT walletName (delegate / permanent delegate). Only recorded in plan.signers — nothing is signed here.",
         ),
+        lookupTables: z.array(z.string()).optional().describe(
+          "Address lookup table addresses to compile the v0 message against (create one with create_lookup_table). Non-signer accounts found in a table are referenced through it (plan.addressTableLookups). Unknown → ALT_NOT_FOUND, deactivated → ALT_DEACTIVATED.",
+        ),
       },
     },
-    run(async (args: TransferArgs & KnobArgs & { cluster?: string; authority?: string }) => {
+    run(async (args: TransferArgs & KnobArgs & { cluster?: string; authority?: string; lookupTables?: string[] }) => {
       const conn = connections.get(args.cluster);
       const from = resolveFrom(deps, args.walletName);
       const base = baseUnits(args);
@@ -207,6 +216,7 @@ export function registerTransferTools(
       const { built, plan } = await buildTransferPlan(conn, {
         ...buildOptions(from.publicKey, args, base, decimals),
         authority: args.authority ? new PublicKey(args.authority) : undefined,
+        lookupTables: args.lookupTables?.map((t) => new PublicKey(t)),
       });
       return {
         program: built.program?.kind ?? "system",
@@ -526,7 +536,7 @@ export function registerTransferTools(
 
 interface TransferArgs {
   walletName: string;
-  to: string;
+  to?: string;
   amount: string;
   mint?: string;
   decimals?: number;
@@ -542,6 +552,8 @@ interface KnobArgs {
   fee?: string;
   memo?: string;
   sourceOwner?: string;
+  sourceTokenAccount?: string;
+  destinationTokenAccount?: string;
 }
 
 function constructionKnobs(z: typeof import("zod").z) {
@@ -566,6 +578,12 @@ function constructionKnobs(z: typeof import("zod").z) {
     ),
     sourceOwner: z.string().optional().describe(
       "Owner address whose associated token account is the SOURCE when it is not walletName (delegate / permanent-delegate transfers). Default: walletName's address.",
+    ),
+    sourceTokenAccount: z.string().optional().describe(
+      "Explicit SOURCE token account address (ATA or not, e.g. one made by create_token_account) instead of deriving an ATA. Excludes sourceOwner (OPTION_CONFLICT). Tokens only.",
+    ),
+    destinationTokenAccount: z.string().optional().describe(
+      "Explicit DESTINATION token account address (ATA or not) instead of the ATA of `to`; makes `to` optional. Never created — must exist (DESTINATION_ACCOUNT_MISSING) unless ataMode=none; ataMode create/always-idempotent → ATA_MODE_CONFLICT. Tokens only.",
     ),
   };
 }
@@ -623,7 +641,7 @@ function buildOptions(payer: PublicKey, args: TransferArgs & KnobArgs, base: big
   }
   return {
     payer,
-    destination: new PublicKey(args.to),
+    destination: args.to ? new PublicKey(args.to) : undefined,
     mint: args.mint ? new PublicKey(args.mint) : undefined,
     amount: base,
     decimals,
@@ -634,6 +652,8 @@ function buildOptions(payer: PublicKey, args: TransferArgs & KnobArgs, base: big
     fee,
     memo: args.memo,
     sourceOwner: args.sourceOwner ? new PublicKey(args.sourceOwner) : undefined,
+    sourceTokenAccount: args.sourceTokenAccount ? new PublicKey(args.sourceTokenAccount) : undefined,
+    destinationTokenAccount: args.destinationTokenAccount ? new PublicKey(args.destinationTokenAccount) : undefined,
   };
 }
 

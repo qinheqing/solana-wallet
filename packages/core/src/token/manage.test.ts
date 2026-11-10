@@ -39,7 +39,7 @@ import {
   withdrawWithheldFromAccounts,
   withdrawWithheldFromMint,
 } from "./manage.js";
-import { accountBase, ext, token2022AccountInfo } from "../inspect/__fixtures__/accounts.js";
+import { accountBase, ext, mintBase, token2022AccountInfo, token2022MintInfo } from "../inspect/__fixtures__/accounts.js";
 
 function fakeConn(opts: {
   mintOwner?: PublicKey; // default TOKEN_2022_PROGRAM_ID
@@ -48,7 +48,16 @@ function fakeConn(opts: {
   const mint = Keypair.generate().publicKey;
   const mintOwner = opts.mintOwner ?? TOKEN_2022_PROGRAM_ID;
   const accounts = new Map<string, { owner: PublicKey; data?: Buffer }>([
-    [mint.toBase58(), { owner: mintOwner }],
+    [
+      mint.toBase58(),
+      {
+        owner: mintOwner,
+        // A decodable mint (decimals 6) so getMint() works — burnChecked reads decimals.
+        data: mintOwner.equals(TOKEN_2022_PROGRAM_ID)
+          ? token2022MintInfo(mintBase({ decimals: 6 }), []).data
+          : mintBase({ decimals: 6 }),
+      },
+    ],
   ]);
   for (const ata of opts.existingAtas ?? []) accounts.set(ata, { owner: PublicKey.default });
 
@@ -126,14 +135,73 @@ describe("mintTokens / burnTokens (8.5)", () => {
     expect(ixs[ixs.length - 1]!.programId.equals(TOKEN_PROGRAM_ID)).toBe(true);
   });
 
-  it("burns from the wallet's own ATA", async () => {
+  it("burns from the wallet's own ATA with BurnChecked by default", async () => {
     const { conn, txs, mint } = fakeConn();
     await burnTokens(conn, authority, mint, 42n);
     const ixs = decode(txs[0]!);
     expect(ixs).toHaveLength(1);
     expect(ixs[0]!.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+    expect(ixs[0]!.data[0]).toBe(15); // BurnChecked
+    expect(ixs[0]!.data.readBigUInt64LE(1)).toBe(42n);
+    expect(ixs[0]!.data[9]).toBe(6); // decimals read from the mint
+    const ownAta = getAssociatedTokenAddressSync(mint, authority.publicKey, true, TOKEN_2022_PROGRAM_ID);
+    expect(ixs[0]!.keys[0]!.equals(ownAta)).toBe(true);
+    expect(ixs[0]!.keys[2]!.equals(authority.publicKey)).toBe(true);
+  });
+
+  it('instruction "burn" keeps the unchecked Burn', async () => {
+    const { conn, txs, mint } = fakeConn();
+    await burnTokens(conn, authority, mint, 42n, { instruction: "burn" });
+    const ixs = decode(txs[0]!);
     expect(ixs[0]!.data[0]).toBe(8); // Burn
     expect(ixs[0]!.data.readBigUInt64LE(1)).toBe(42n);
+  });
+
+  it("burns another holder's ATA via sourceOwner with the signer as authority (permanent delegate)", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const holder = Keypair.generate().publicKey;
+    await burnTokens(conn, authority, mint, 7n, { sourceOwner: holder });
+    const ixs = decode(txs[0]!);
+    const holderAta = getAssociatedTokenAddressSync(mint, holder, true, TOKEN_2022_PROGRAM_ID);
+    expect(ixs[0]!.keys[0]!.equals(holderAta)).toBe(true);
+    expect(ixs[0]!.keys[1]!.equals(mint)).toBe(true);
+    expect(ixs[0]!.keys[2]!.equals(authority.publicKey)).toBe(true);
+    // only the signer signs; the holder is not a signer
+    expect(txs[0]!.message.header.numRequiredSignatures).toBe(1);
+  });
+
+  it("burns from an explicit sourceAccount", async () => {
+    const { conn, txs, mint } = fakeConn({ mintOwner: TOKEN_PROGRAM_ID });
+    const account = Keypair.generate().publicKey;
+    await burnTokens(conn, authority, mint, 3n, { sourceAccount: account });
+    const ixs = decode(txs[0]!);
+    expect(ixs[0]!.programId.equals(TOKEN_PROGRAM_ID)).toBe(true);
+    expect(ixs[0]!.keys[0]!.equals(account)).toBe(true);
+  });
+
+  it("rejects sourceAccount together with sourceOwner (OPTION_CONFLICT)", async () => {
+    const { conn, mint } = fakeConn();
+    await expect(
+      burnTokens(conn, authority, mint, 1n, {
+        sourceAccount: Keypair.generate().publicKey,
+        sourceOwner: Keypair.generate().publicKey,
+      }),
+    ).rejects.toMatchObject({ code: "OPTION_CONFLICT" });
+  });
+
+  it("mints into an explicit destinationAccount without creating an ATA", async () => {
+    const { conn, txs, mint } = fakeConn();
+    const account = Keypair.generate().publicKey;
+    await mintTokens(conn, authority, mint, null, 9n, { destinationAccount: account });
+    const ixs = decode(txs[0]!);
+    expect(ixs).toHaveLength(1);
+    expect(ixs[0]!.data[0]).toBe(7); // MintTo
+    expect(ixs[0]!.keys[1]!.equals(account)).toBe(true);
+  });
+
+  it("mintTokens without owner or destinationAccount → DESTINATION_REQUIRED", async () => {
+    const { conn, mint } = fakeConn();
+    await expect(mintTokens(conn, authority, mint, null, 1n)).rejects.toMatchObject({ code: "DESTINATION_REQUIRED" });
   });
 
   it("rejects zero/negative amounts with AMOUNT_INVALID", async () => {

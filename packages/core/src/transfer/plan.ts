@@ -9,6 +9,7 @@
 import {
   PublicKey,
   TransactionMessage,
+  type AddressLookupTableAccount,
   VersionedTransaction,
   type MessageV0,
   type TransactionInstruction,
@@ -53,6 +54,11 @@ export interface TransactionPlan {
   signers: string[];
   blockhash: string;
   feePayer: string;
+  /**
+   * Address-table lookups the v0 message compiled to (empty when no lookup
+   * tables were supplied): table address + indexes into it.
+   */
+  addressTableLookups: Array<{ table: string; writableIndexes: number[]; readonlyIndexes: number[] }>;
 }
 
 /** Describe instructions; `labels[i]` is attached to `ixs[i]` when provided. */
@@ -93,20 +99,29 @@ export function planFromMessage(
     signers: message.staticAccountKeys.slice(0, numSigners).map((k) => k.toBase58()),
     blockhash: message.recentBlockhash,
     feePayer: message.staticAccountKeys[0]!.toBase58(),
+    addressTableLookups: message.addressTableLookups.map((l) => ({
+      table: l.accountKey.toBase58(),
+      writableIndexes: [...l.writableIndexes],
+      readonlyIndexes: [...l.readonlyIndexes],
+    })),
   };
 }
 
-/** Compile `ixs` into a v0 message for `payer` and describe it. */
+/**
+ * Compile `ixs` into a v0 message for `payer` and describe it. Non-signer
+ * accounts present in `lookupTables` are referenced through the tables.
+ */
 export function planFromInstructions(
   payer: PublicKey,
   blockhash: string,
   ixs: readonly TransactionInstruction[],
   labels: readonly string[] = [],
+  lookupTables: readonly AddressLookupTableAccount[] = [],
 ): { message: MessageV0; plan: TransactionPlan } {
   const message = new TransactionMessage({
     payerKey: payer,
     recentBlockhash: blockhash,
     instructions: [...ixs],
-  }).compileToV0Message();
+  }).compileToV0Message([...lookupTables]);
   return { message, plan: planFromMessage(message, ixs, labels) };
 }

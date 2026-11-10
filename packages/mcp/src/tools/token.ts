@@ -34,6 +34,7 @@ import {
   TOKEN_PRESETS,
   type Token2022ExtensionOptions,
   type TokenPresetName,
+  createTokenAccount,
 } from "@sol-wallet/core";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
@@ -327,7 +328,7 @@ export function registerTokenTools(
     "manage_token2022",
     {
       description:
-        "Runtime management of a token mint: mintTokens/burnTokens (SPL & Token-2022), plus Token-2022-only actions — setTransferFee (effective next epoch), freezeAccount/thawAccount, setMintAuthority/setFreezeAuthority (revoke requires confirmRevoke:true), updateMetadata (name/symbol/uri/custom key), updateScaledUiMultiplier (display-only), enableMemoTransfer/disableMemoTransfer (this wallet's own ATA; reallocates it when needed), withdrawWithheldFromAccounts / harvestWithheldToMint / withdrawWithheldFromMint (transfer-fee collection), updateTransferHookProgram, pauseMint/resumeMint (Pausable), closeMint (MintCloseAuthority, supply must be 0; requires confirmClose:true), updateInterestRate (InterestBearing), updateDefaultAccountState (freeze authority), setExtensionAuthority (rotate/revoke one extension authority). Verify results with inspect_mint / inspect_token_account.",
+        "Runtime management of a token mint: mintTokens/burnTokens (SPL & Token-2022; burn from any token account as owner / delegate / permanent delegate), plus Token-2022-only actions — setTransferFee (effective next epoch), freezeAccount/thawAccount, setMintAuthority/setFreezeAuthority (revoke requires confirmRevoke:true), updateMetadata (name/symbol/uri/custom key), updateScaledUiMultiplier (display-only), enableMemoTransfer/disableMemoTransfer (this wallet's own ATA; reallocates it when needed), withdrawWithheldFromAccounts / harvestWithheldToMint / withdrawWithheldFromMint (transfer-fee collection), updateTransferHookProgram, pauseMint/resumeMint (Pausable), closeMint (MintCloseAuthority, supply must be 0; requires confirmClose:true), updateInterestRate (InterestBearing), updateDefaultAccountState (freeze authority), setExtensionAuthority (rotate/revoke one extension authority). Verify results with inspect_mint / inspect_token_account.",
       inputSchema: {
         walletName: z.string().describe("Authority wallet (loaded)."),
         mint: z.string().describe("Mint address."),
@@ -357,7 +358,7 @@ export function registerTokenTools(
           ])
           .describe("Management action."),
         params: z.record(z.unknown()).optional().describe(
-          "Action params: mintTokens {destinationOwner, amount} · burnTokens {amount} · setTransferFee {transferFeeBasisPoints, maximumFee} · freezeAccount/thawAccount {tokenAccountOwner? (default: authority wallet)} · setMintAuthority/setFreezeAuthority {newAuthority | null + confirmRevoke:true to revoke} · updateMetadata {field(name|symbol|uri|custom), value} · updateScaledUiMultiplier {multiplier (number > 0), effectiveTimestamp? (unix seconds, default 0 = now)} · enableMemoTransfer/disableMemoTransfer {} (acts on this wallet's ATA of the mint; wallet must own it) · withdrawWithheldFromAccounts {sources: string[] (token ACCOUNT addresses, not owners), destination? (token account; default this wallet's ATA)} · harvestWithheldToMint {sources: string[]} (permissionless) · withdrawWithheldFromMint {destination?} · updateTransferHookProgram {programId: string | null (null clears the hook)} · pauseMint/resumeMint {} (wallet = pause authority) · closeMint {destination? (receives rent; default this wallet), confirmClose: true} (IRREVERSIBLE) · updateInterestRate {rate: integer bps/year, −32768…32767} (wallet = rate authority) · updateDefaultAccountState {state: \"initialized\" | \"frozen\"} (wallet = freeze authority) · setExtensionAuthority {kind: transferFeeConfig | withheldWithdraw | closeMint | interestRate | permanentDelegate | transferHookProgramId | metadataPointer | scaledUiAmount | pausable, newAuthority: address | null (+ confirmRevoke:true to revoke)}. NOTE: amount and maximumFee are base units (integer string, NOT human-readable) — \"1000000\" = 1 token at 6 decimals; \"1.5\" is rejected.",
+          "Action params: mintTokens {destinationOwner, amount, destinationAccount? (explicit token account, ATA or not — then destinationOwner is optional and no ATA is created)} · burnTokens {amount, sourceAccount? (explicit token account) | sourceOwner? (burn from that owner's ATA; default this wallet), instruction? (\"burnChecked\" default | \"burn\")} — the wallet signs as burn authority: the account owner, its approved delegate, or the mint's PermanentDelegate · setTransferFee {transferFeeBasisPoints, maximumFee} · freezeAccount/thawAccount {tokenAccountOwner? (default: authority wallet)} · setMintAuthority/setFreezeAuthority {newAuthority | null + confirmRevoke:true to revoke} · updateMetadata {field(name|symbol|uri|custom), value} · updateScaledUiMultiplier {multiplier (number > 0), effectiveTimestamp? (unix seconds, default 0 = now)} · enableMemoTransfer/disableMemoTransfer {} (acts on this wallet's ATA of the mint; wallet must own it) · withdrawWithheldFromAccounts {sources: string[] (token ACCOUNT addresses, not owners), destination? (token account; default this wallet's ATA)} · harvestWithheldToMint {sources: string[]} (permissionless) · withdrawWithheldFromMint {destination?} · updateTransferHookProgram {programId: string | null (null clears the hook)} · pauseMint/resumeMint {} (wallet = pause authority) · closeMint {destination? (receives rent; default this wallet), confirmClose: true} (IRREVERSIBLE) · updateInterestRate {rate: integer bps/year, −32768…32767} (wallet = rate authority) · updateDefaultAccountState {state: \"initialized\" | \"frozen\"} (wallet = freeze authority) · setExtensionAuthority {kind: transferFeeConfig | withheldWithdraw | closeMint | interestRate | permanentDelegate | transferHookProgramId | metadataPointer | scaledUiAmount | pausable, newAuthority: address | null (+ confirmRevoke:true to revoke)}. NOTE: amount and maximumFee are base units (integer string, NOT human-readable) — \"1000000\" = 1 token at 6 decimals; \"1.5\" is rejected.",
         ),
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
@@ -430,7 +431,15 @@ export function registerTokenTools(
         case "mintTokens": {
           const amount = baseUnits("amount");
           const decimals = await tryDecimals(conn, mint);
-          const res = await mintTokens(conn, from, mint, str("destinationOwner", "recipient wallet address"), amount, opts);
+          const destinationAccount = optionalStr("destinationAccount");
+          const res = await mintTokens(
+            conn,
+            from,
+            mint,
+            destinationAccount ? (optionalStr("destinationOwner") ?? null) : str("destinationOwner", "recipient wallet address, or destinationAccount"),
+            amount,
+            { ...opts, destinationAccount },
+          );
           return {
             action: args.action,
             ...res,
@@ -443,7 +452,16 @@ export function registerTokenTools(
         case "burnTokens": {
           const amount = baseUnits("amount");
           const decimals = await tryDecimals(conn, mint);
-          const res = await burnTokens(conn, from, mint, amount, opts);
+          const instruction = optionalStr("instruction");
+          if (instruction !== undefined && instruction !== "burnChecked" && instruction !== "burn") {
+            throw new Error(`params.instruction must be "burnChecked" or "burn", got "${instruction}".`);
+          }
+          const res = await burnTokens(conn, from, mint, amount, {
+            ...opts,
+            sourceAccount: optionalStr("sourceAccount"),
+            sourceOwner: optionalStr("sourceOwner"),
+            instruction,
+          });
           return {
             action: args.action,
             ...res,
@@ -615,6 +633,38 @@ export function registerTokenTools(
           };
         }
       }
+    }),
+  );
+
+  server.registerTool(
+    "create_token_account",
+    {
+      description:
+        "Create a token account for a mint at a fresh, NON-associated address (SystemProgram.createAccount + InitializeAccount3). Space is sized from the mint: SPL fixed 165 bytes; Token-2022 includes the account extensions the mint's extensions require. walletName pays rent and fees; `owner` (default walletName) controls the balance. Returns the new address — use it as transfer/build_transfer sourceTokenAccount / destinationTokenAccount, manage_token2022 mintTokens destinationAccount / burnTokens sourceAccount, or inspect_token_account. To get an ATA instead, just transfer/mint to the owner.",
+      inputSchema: {
+        walletName: z.string().describe("Loaded wallet paying rent and fees."),
+        mint: z.string().describe("Mint address (SPL Token or Token-2022, detected on chain)."),
+        owner: z.string().optional().describe("Owner of the new token account. Default: walletName's address."),
+        dryRun: z.boolean().optional().describe("Simulate only; the generated address is still returned but nothing is created."),
+        allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
+        cluster: clusterParam(z, deps),
+      },
+    },
+    run(async (args: { walletName: string; mint: string; owner?: string; dryRun?: boolean; allowMainnet?: boolean; cluster?: string }) => {
+      const conn = connections.get(args.cluster);
+      const payer = deps.store.require(args.walletName).keypair;
+      const res = await createTokenAccount(
+        conn,
+        payer,
+        { mint: args.mint, owner: args.owner },
+        { dryRun: args.dryRun, allowMainnet: args.allowMainnet },
+      );
+      return {
+        ok: !res.error,
+        ...res,
+        feeDisplay: solDisplay(res.feeLamports),
+        rentDisplay: solDisplay(res.rentLamports),
+      };
     }),
   );
 

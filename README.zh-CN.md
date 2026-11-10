@@ -115,7 +115,7 @@ claude mcp add solwallet \
 
 ### 工具
 
-共 33 个，分 10 组。所有发送类工具都支持 `dryRun: true`（只模拟）和 `cluster`（集群名或 RPC URL）。
+共 37 个，分 11 组。所有发送类工具都支持 `dryRun: true`（只模拟）和 `cluster`（集群名或 RPC URL）。
 
 <details>
 <summary><b>钱包与集群（8）</b></summary>
@@ -176,6 +176,18 @@ claude mcp add solwallet \
 | `propose_multisig` / `approve_multisig` / `execute_multisig` | 对金库转账发起提案、批准、执行 |
 | `get_multisig` | 成员、阈值、金库，以及每个提案和投票情况 |
 | `get_guide` | 按章节读取内置使用手册（工具选择、预检代码、错误处理、剧本……） |
+
+</details>
+
+<details>
+<summary><b>账户与地址查找表（4）</b></summary>
+
+| 工具 | 用途 |
+|---|---|
+| `create_token_account` | 在任意（非 ATA）地址创建代币账户（按 Token-2022 扩展算空间），配合 `sourceTokenAccount` / `destinationTokenAccount` 使用 |
+| `create_lookup_table` | 创建地址查找表，可带初始地址 |
+| `manage_lookup_table` | 追加地址、停用或关闭查找表 |
+| `inspect_lookup_table` | 查看查找表的权限方、地址、是否活跃与 slot；转账用 `lookupTables` 按表编译 |
 
 </details>
 
@@ -267,7 +279,7 @@ devnet / testnet 的公共 RPC 水龙头目前返回 HTTP 410，`request_airdrop
 ```
 packages/
   core/          @sol-wallet/core：连接、钱包、转账、代币、观察解析、多签（不依赖任何 UI）
-  mcp/           @sol-wallet/mcp：33 个 MCP 工具，薄薄一层调用 core（stdio）
+  mcp/           @sol-wallet/mcp：37 个 MCP 工具，薄薄一层调用 core（stdio）
   cpi-program/   示例 Pinocchio 程序：带 authority 校验的金库 + transferChecked 转发
 apps/web/        React + Vite 控制台
 skills/          Claude Skill（SKILL.md）

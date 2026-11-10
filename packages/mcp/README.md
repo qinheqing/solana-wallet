@@ -36,7 +36,7 @@ Requires Node.js 20 or later.
 
 ## What it can do
 
-33 tools, grouped:
+37 tools, grouped:
 
 - **Wallets**: `create_wallet`, `import_wallet`, `list_wallets`, `export_secret`, `remove_wallet`
 - **Cluster**: `get_cluster_status`, `request_airdrop`, `get_balances`
@@ -45,6 +45,7 @@ Requires Node.js 20 or later.
 - **Tokens**: `create_token` (SPL with Metaplex metadata, or Token-2022 with extensions), `manage_token2022` (21 runtime actions), `find_withheld_accounts`
 - **Multisig (Squads v4)**: `create_multisig`, `propose_multisig`, `approve_multisig`, `execute_multisig`, `get_multisig`
 - **Inspection**: `derive_address`, `inspect_mint`, `inspect_token_account`, `inspect_transaction`, `inspect_raw_transaction`
+- **Accounts & lookup tables**: `create_token_account`, `create_lookup_table`, `manage_lookup_table`, `inspect_lookup_table`
 - **Guide**: `get_guide`
 
 ## Built-in usage guide

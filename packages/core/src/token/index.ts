@@ -13,6 +13,7 @@ export {
 export {
   mintTokens,
   burnTokens,
+  type BurnTokensOptions,
   setTransferFee,
   freezeTokenAccount,
   thawTokenAccount,
@@ -80,3 +81,10 @@ export {
 } from "./presets.js";
 
 export type { SendTokenOptions, TokenTxResult } from "./internal.js";
+
+// --- token accounts at arbitrary (non-ATA) addresses -----------------------
+export {
+  createTokenAccount,
+  type CreateTokenAccountParams,
+  type CreateTokenAccountResult,
+} from "./account.js";

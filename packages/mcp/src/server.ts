@@ -14,6 +14,7 @@ import { makeSanitizer } from "./output.js";
 import { registerCpiTools } from "./tools/cpi.js";
 import { registerGuideTools } from "./tools/guide.js";
 import { registerInspectTools } from "./tools/inspect.js";
+import { registerLookupTableTools } from "./tools/lookup-table.js";
 import { registerMultisigTools } from "./tools/multisig.js";
 import { registerRawTools } from "./tools/raw.js";
 import { registerTokenTools } from "./tools/token.js";
@@ -102,6 +103,7 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
   registerMultisigTools(server, deps, z);
   // PRD T-D: raw transaction channel (sign / simulate / send hex payloads).
   registerRawTools(server, deps, z);
+  registerLookupTableTools(server, deps, z);
   // PRD T-A / T-E: derive_address, inspect_mint, inspect_token_account, inspect_transaction.
   registerInspectTools(server, deps, z);
   // PRD T-I: cpi_token_transfer (TransferChecked as an inner instruction via solwallet_cpi).

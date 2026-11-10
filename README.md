@@ -115,7 +115,7 @@ claude mcp add solwallet \
 
 ### Tools
 
-33 tools in 10 groups. Every sending tool accepts `dryRun: true` (simulate only) and `cluster` (cluster name or RPC URL).
+37 tools in 11 groups. Every sending tool accepts `dryRun: true` (simulate only) and `cluster` (cluster name or RPC URL).
 
 <details>
 <summary><b>Wallets & cluster (8)</b></summary>
@@ -176,6 +176,18 @@ claude mcp add solwallet \
 | `propose_multisig` / `approve_multisig` / `execute_multisig` | Propose, approve and execute a vault transfer |
 | `get_multisig` | Members, threshold, vault and every proposal with its votes |
 | `get_guide` | Read a section of the built-in usage guide (tool selection, preflight codes, errors, playbooks…) |
+
+</details>
+
+<details>
+<summary><b>Accounts & lookup tables (4)</b></summary>
+
+| Tool | What it does |
+|---|---|
+| `create_token_account` | Create a token account at a fresh, non-ATA address (sized for Token-2022 extensions); use it with `sourceTokenAccount` / `destinationTokenAccount` |
+| `create_lookup_table` | Create an address lookup table, optionally seeded with addresses |
+| `manage_lookup_table` | Extend, deactivate or close a lookup table |
+| `inspect_lookup_table` | Authority, addresses, activity and slots of a lookup table; compile transfers against tables with `lookupTables` |
 
 </details>
 
@@ -267,7 +279,7 @@ The public devnet/testnet RPC faucets currently return HTTP 410, so `request_air
 ```
 packages/
   core/          @sol-wallet/core — connection, wallets, transfers, tokens, inspection, multisig (no UI deps)
-  mcp/           @sol-wallet/mcp  — 33 MCP tools, a thin layer over core (stdio)
+  mcp/           @sol-wallet/mcp  — 37 MCP tools, a thin layer over core (stdio)
   cpi-program/   Example Pinocchio program: authority-gated vault + transferChecked forwarder
 apps/web/        React + Vite console
 skills/          Claude Skill (SKILL.md)

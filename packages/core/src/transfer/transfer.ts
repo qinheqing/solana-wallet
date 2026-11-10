@@ -20,14 +20,18 @@ import {
   type TransferInstructionKind,
 } from "./build.js";
 import { planFromInstructions, type TransactionPlan } from "./plan.js";
+import { fetchLookupTables } from "../lookup-table/lookup-table.js";
 import { describeBlockers, preflightTransferWithAccounts, type PreflightResult } from "./preflight.js";
 import type { TokenProgramKind } from "./program.js";
 
 export interface TransferRequest {
   /** Fee payer & source-of-funds owner. */
   from: Keypair;
-  /** SOL recipient, or the owner receiving tokens at their ATA. */
-  destination: string | PublicKey;
+  /**
+   * SOL recipient, or the owner receiving tokens at their ATA. Optional only
+   * for token transfers that pass `destinationTokenAccount`.
+   */
+  destination?: string | PublicKey;
   /** Omit for native SOL. */
   mint?: string | PublicKey;
   /** Base units (lamports / token base units). */
@@ -56,6 +60,12 @@ export interface TransferRequest {
   authority?: string | PublicKey;
   /** Owner of the source ATA when it is not `from`. */
   sourceOwner?: string | PublicKey;
+  /** Explicit source token account (ATA or not); excludes sourceOwner. */
+  sourceTokenAccount?: string | PublicKey;
+  /** Explicit destination token account (ATA or not); never created. */
+  destinationTokenAccount?: string | PublicKey;
+  /** Address lookup tables to compile the v0 message against. */
+  lookupTables?: Array<string | PublicKey>;
   /** Memo-program instruction placed right before the transfer. */
   memo?: string;
   /** Additional signers, e.g. the `authority` keypair when it differs from `from`. */
@@ -144,7 +154,7 @@ export async function transfer(
   conn: ClusterConnection,
   req: TransferRequest,
 ): Promise<TransferResult> {
-  const destination = toPubkey(req.destination);
+  const destination = req.destination ? toPubkey(req.destination) : undefined;
   const mint = req.mint ? toPubkey(req.mint) : undefined;
   const buildOpts = {
     payer: req.from.publicKey,
@@ -159,8 +169,12 @@ export async function transfer(
     fee: req.fee,
     authority: req.authority ? toPubkey(req.authority) : undefined,
     sourceOwner: req.sourceOwner ? toPubkey(req.sourceOwner) : undefined,
+    sourceTokenAccount: req.sourceTokenAccount ? toPubkey(req.sourceTokenAccount) : undefined,
+    destinationTokenAccount: req.destinationTokenAccount ? toPubkey(req.destinationTokenAccount) : undefined,
     memo: req.memo,
   };
+  // Resolved up front so an unusable table fails before anything is built.
+  const tables = req.lookupTables?.length ? await fetchLookupTables(conn, req.lookupTables) : [];
 
   // Preflight (T-C): block-level findings stop here unless `force`. The plan
   // is still built best-effort so callers can inspect what would have gone
@@ -177,7 +191,7 @@ export async function transfer(
     try {
       const built = await buildTransferInstructions(conn, buildOpts, preloaded);
       const { blockhash } = await conn.connection.getLatestBlockhash("confirmed");
-      plan = planFromInstructions(req.from.publicKey, blockhash, built.instructions, built.labels).plan;
+      plan = planFromInstructions(req.from.publicKey, blockhash, built.instructions, built.labels, tables).plan;
       program = built.program?.kind ?? "system";
       destinationAtaCreated = built.destinationAtaCreated;
       destinationAtaExisted = built.destinationAtaExisted;
@@ -211,6 +225,7 @@ export async function transfer(
     blockhash,
     built.instructions,
     built.labels,
+    tables,
   );
 
   // Every required signer must be supplied up front: a missing one would
