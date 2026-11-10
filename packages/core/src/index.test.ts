@@ -3,7 +3,7 @@ import { CORE_VERSION, type Cluster } from "./index.js";
 
 describe("@sol-wallet/core smoke", () => {
   it("exports a version", () => {
-    expect(CORE_VERSION).toBe("0.1.0");
+    expect(CORE_VERSION).toBe("0.2.0");
   });
 
   it("defines the three official clusters", () => {

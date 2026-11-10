@@ -4,7 +4,7 @@
  * Zero UI dependencies. All modules (connection, wallet, transfer, token,
  * multisig) are built on this package.
  */
-export const CORE_VERSION = "0.1.0" as const;
+export const CORE_VERSION = "0.2.0" as const;
 
 export type Cluster = "mainnet-beta" | "devnet" | "testnet" | "custom";
 
