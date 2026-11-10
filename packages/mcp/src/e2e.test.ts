@@ -148,6 +148,10 @@ const TOOL_NAMES = [
   "revoke_delegate",
   // PRD T-I (task 23)
   "cpi_token_transfer",
+  // web ↔ MCP parity
+  "remove_wallet",
+  "find_withheld_accounts",
+  "inspect_raw_transaction",
 ];
 
 describe("solwallet MCP server (11.6)", () => {
@@ -1396,6 +1400,56 @@ describe("base-unit inputs, *Display hints and optional decimals", () => {
       expect(schema, name).toMatch(/BASE UNITS/);
       expect(schema, name).not.toMatch(/[Hh]uman-readable amount/);
     }
+    await t.cleanup();
+  });
+});
+
+describe("web ↔ MCP parity tools", () => {
+  it("remove_wallet: requires confirmName, then forgets the wallet", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "tmp" });
+    const refused = await t.call("remove_wallet", { walletName: "tmp", confirmName: "nope" });
+    expect(refused.isError).toBe(true);
+    expect(t.text(refused)).toMatch(/confirmName/);
+    const ok = JSON.parse(t.text(await t.call("remove_wallet", { walletName: "tmp", confirmName: "tmp" })));
+    expect(ok).toMatchObject({ removed: "tmp", remaining: 0 });
+    expect(JSON.parse(t.text(await t.call("list_wallets", {}))).wallets).toEqual([]);
+    const gone = await t.call("remove_wallet", { walletName: "tmp", confirmName: "tmp" });
+    expect(gone.isError).toBe(true);
+    await t.cleanup();
+  });
+
+  it("manage_token2022 new actions validate their params before touching the chain", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "auth" });
+    const mint = Keypair.generate().publicKey.toBase58();
+    const cases: Array<[string, Record<string, unknown>, RegExp]> = [
+      ["closeMint", {}, /IRREVERSIBLE|confirmClose/],
+      ["updateInterestRate", {}, /params\.rate/],
+      ["updateDefaultAccountState", { state: "open" }, /params\.state/],
+      ["setExtensionAuthority", { kind: "bogus", newAuthority: null }, /params\.kind/],
+      ["setExtensionAuthority", { kind: "pausable" }, /params\.newAuthority/],
+    ];
+    for (const [action, params, re] of cases) {
+      const res = await t.call("manage_token2022", { walletName: "auth", mint, action, params });
+      expect(res.isError, action).toBe(true);
+      expect(t.text(res), action).toMatch(re);
+    }
+    await t.cleanup();
+  });
+
+  it("create_token rejects Metaplex metadata on a token-2022 mint", async () => {
+    const t = await setup();
+    await t.call("create_wallet", { name: "auth" });
+    const res = await t.call("create_token", {
+      walletName: "auth",
+      decimals: 6,
+      tokenProgram: "token-2022",
+      metadata: { name: "X", symbol: "X" },
+      dryRun: true,
+    });
+    expect(res.isError).toBe(true);
+    expect(t.text(res)).toMatch(/extensions\.tokenMetadata/);
     await t.cleanup();
   });
 });

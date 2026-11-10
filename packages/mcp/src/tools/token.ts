@@ -21,6 +21,15 @@ import {
   harvestWithheldToMint,
   withdrawWithheldFromMint,
   updateTransferHookProgram,
+  pauseMint,
+  resumeMint,
+  closeMint,
+  updateInterestRate,
+  updateDefaultAccountState,
+  setExtensionAuthority,
+  findWithheldAccounts,
+  EXTENSION_AUTHORITY_TYPES,
+  type ExtensionAuthorityKind,
   createFromPreset,
   TOKEN_PRESETS,
   type Token2022ExtensionOptions,
@@ -42,6 +51,8 @@ function toCoreExtensions(raw: {
   tokenMetadata?: { name: string; symbol: string; uri: string };
   defaultAccountState?: { accountState: "frozen" };
   scaledUiAmount?: { multiplier: number; authority?: string };
+  pausable?: { authority?: string };
+  mintCloseAuthority?: { closeAuthority?: string };
 }): Token2022ExtensionOptions {
   const extensions: Token2022ExtensionOptions = {};
   if (raw.transferFeeConfig) {
@@ -68,6 +79,14 @@ function toCoreExtensions(raw: {
       authority: raw.scaledUiAmount.authority ? new PublicKey(raw.scaledUiAmount.authority) : undefined,
     };
   }
+  if (raw.pausable) {
+    extensions.pausable = { authority: raw.pausable.authority ? new PublicKey(raw.pausable.authority) : undefined };
+  }
+  if (raw.mintCloseAuthority) {
+    extensions.mintCloseAuthority = {
+      closeAuthority: raw.mintCloseAuthority.closeAuthority ? new PublicKey(raw.mintCloseAuthority.closeAuthority) : undefined,
+    };
+  }
   return extensions;
 }
 
@@ -84,7 +103,7 @@ export function registerTokenTools(
     "create_token",
     {
       description:
-        "Create a new SPL Token or Token-2022 mint. Token-2022 enables extensions: transferFeeConfig, transferHook, interestBearingConfig, nonTransferable, permanentDelegate, tokenMetadata (on-chain name/symbol/uri), defaultAccountState=frozen and scaledUiAmount (display-only multiplier). Optional `preset` fills defaults (plain-2022 | transfer-fee | permanent-delegate | scaled-ui | transfer-hook | legacy-spl | memo-required); explicit fields override preset values. Optional `mintTo` mints an initial amount right after creation. Returns the mint address, signature and enabled extensions.",
+        "Create a new SPL Token or Token-2022 mint. Token-2022 enables extensions: transferFeeConfig, transferHook, interestBearingConfig, nonTransferable, permanentDelegate, tokenMetadata (on-chain name/symbol/uri), defaultAccountState=frozen, scaledUiAmount (display-only multiplier), pausable and mintCloseAuthority. A spl-token mint can carry Metaplex metadata via `metadata`. Optional `preset` fills defaults (plain-2022 | transfer-fee | permanent-delegate | scaled-ui | transfer-hook | legacy-spl | memo-required); explicit fields override preset values. Optional `mintTo` mints an initial amount right after creation. Returns the mint address, signature and enabled extensions.",
       inputSchema: {
         walletName: z.string().describe("Mint authority wallet (loaded); pays creation fees."),
         preset: z
@@ -155,9 +174,27 @@ export function registerTokenTools(
               })
               .optional()
               .describe("ScaledUiAmount: UIs display raw × multiplier. Display-only — raw amounts in this wallet are never scaled."),
+            pausable: z
+              .object({ authority: z.string().optional().describe("Pause authority (default: this wallet).") })
+              .optional()
+              .describe("Pausable: the pause authority can halt ALL transfers, mints and burns (manage_token2022 pauseMint / resumeMint)."),
+            mintCloseAuthority: z
+              .object({ closeAuthority: z.string().optional().describe("Close authority (default: this wallet).") })
+              .optional()
+              .describe("MintCloseAuthority: lets the close authority close the mint once supply is 0 (manage_token2022 closeMint)."),
           })
           .optional()
           .describe("Token-2022 extension config (ignored for spl-token)."),
+        metadata: z
+          .object({
+            name: z.string().min(1).describe("Token name (≤ 32 bytes)."),
+            symbol: z.string().min(1).describe("Token symbol (≤ 10 bytes)."),
+            uri: z.string().optional().describe("Off-chain JSON URI (≤ 200 bytes, may be empty)."),
+          })
+          .optional()
+          .describe(
+            "spl-token only: name/symbol/uri via a Metaplex Token Metadata account created in the same transaction (the Metaplex program must exist on the cluster). For token-2022 use extensions.tokenMetadata instead.",
+          ),
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
         cluster: clusterParam(z, deps),
@@ -165,6 +202,7 @@ export function registerTokenTools(
     },
     run(async (args: {
       walletName: string;
+      metadata?: { name: string; symbol: string; uri?: string };
       preset?: TokenPresetName;
       decimals?: number;
       mintTo?: { owner: string; amount: string };
@@ -178,6 +216,8 @@ export function registerTokenTools(
         tokenMetadata?: { name: string; symbol: string; uri: string };
         defaultAccountState?: { accountState: "frozen" };
         scaledUiAmount?: { multiplier: number; authority?: string };
+        pausable?: { authority?: string };
+        mintCloseAuthority?: { closeAuthority?: string };
       };
       dryRun?: boolean;
       allowMainnet?: boolean;
@@ -224,6 +264,9 @@ export function registerTokenTools(
       if (args.decimals === undefined) {
         throw new Error("Missing decimals — required unless a preset is given.");
       }
+      if (args.metadata && args.tokenProgram === "token-2022") {
+        throw new Error("`metadata` (Metaplex) is for spl-token mints; for token-2022 pass extensions.tokenMetadata.");
+      }
       const base = {
         decimals: args.decimals,
         dryRun: args.dryRun,
@@ -262,7 +305,7 @@ export function registerTokenTools(
         };
       }
 
-      const result = await createSplToken(conn, from, base);
+      const result = await createSplToken(conn, from, { ...base, metadata: args.metadata });
       return {
         mint: result.mint,
         tokenProgram: "spl-token",
@@ -284,7 +327,7 @@ export function registerTokenTools(
     "manage_token2022",
     {
       description:
-        "Runtime management of a token mint: mintTokens/burnTokens (SPL & Token-2022), plus Token-2022-only actions — setTransferFee (effective next epoch), freezeAccount/thawAccount, setMintAuthority/setFreezeAuthority (revoke requires confirmRevoke:true), updateMetadata (name/symbol/uri/custom key), updateScaledUiMultiplier (display-only), enableMemoTransfer/disableMemoTransfer (this wallet's own ATA; reallocates it when needed), withdrawWithheldFromAccounts / harvestWithheldToMint / withdrawWithheldFromMint (transfer-fee collection), updateTransferHookProgram. Verify results with inspect_mint / inspect_token_account.",
+        "Runtime management of a token mint: mintTokens/burnTokens (SPL & Token-2022), plus Token-2022-only actions — setTransferFee (effective next epoch), freezeAccount/thawAccount, setMintAuthority/setFreezeAuthority (revoke requires confirmRevoke:true), updateMetadata (name/symbol/uri/custom key), updateScaledUiMultiplier (display-only), enableMemoTransfer/disableMemoTransfer (this wallet's own ATA; reallocates it when needed), withdrawWithheldFromAccounts / harvestWithheldToMint / withdrawWithheldFromMint (transfer-fee collection), updateTransferHookProgram, pauseMint/resumeMint (Pausable), closeMint (MintCloseAuthority, supply must be 0; requires confirmClose:true), updateInterestRate (InterestBearing), updateDefaultAccountState (freeze authority), setExtensionAuthority (rotate/revoke one extension authority). Verify results with inspect_mint / inspect_token_account.",
       inputSchema: {
         walletName: z.string().describe("Authority wallet (loaded)."),
         mint: z.string().describe("Mint address."),
@@ -305,10 +348,16 @@ export function registerTokenTools(
             "harvestWithheldToMint",
             "withdrawWithheldFromMint",
             "updateTransferHookProgram",
+            "pauseMint",
+            "resumeMint",
+            "closeMint",
+            "updateInterestRate",
+            "updateDefaultAccountState",
+            "setExtensionAuthority",
           ])
           .describe("Management action."),
         params: z.record(z.unknown()).optional().describe(
-          "Action params: mintTokens {destinationOwner, amount} · burnTokens {amount} · setTransferFee {transferFeeBasisPoints, maximumFee} · freezeAccount/thawAccount {tokenAccountOwner? (default: authority wallet)} · setMintAuthority/setFreezeAuthority {newAuthority | null + confirmRevoke:true to revoke} · updateMetadata {field(name|symbol|uri|custom), value} · updateScaledUiMultiplier {multiplier (number > 0), effectiveTimestamp? (unix seconds, default 0 = now)} · enableMemoTransfer/disableMemoTransfer {} (acts on this wallet's ATA of the mint; wallet must own it) · withdrawWithheldFromAccounts {sources: string[] (token ACCOUNT addresses, not owners), destination? (token account; default this wallet's ATA)} · harvestWithheldToMint {sources: string[]} (permissionless) · withdrawWithheldFromMint {destination?} · updateTransferHookProgram {programId: string | null (null clears the hook)}. NOTE: amount and maximumFee are base units (integer string, NOT human-readable) — \"1000000\" = 1 token at 6 decimals; \"1.5\" is rejected.",
+          "Action params: mintTokens {destinationOwner, amount} · burnTokens {amount} · setTransferFee {transferFeeBasisPoints, maximumFee} · freezeAccount/thawAccount {tokenAccountOwner? (default: authority wallet)} · setMintAuthority/setFreezeAuthority {newAuthority | null + confirmRevoke:true to revoke} · updateMetadata {field(name|symbol|uri|custom), value} · updateScaledUiMultiplier {multiplier (number > 0), effectiveTimestamp? (unix seconds, default 0 = now)} · enableMemoTransfer/disableMemoTransfer {} (acts on this wallet's ATA of the mint; wallet must own it) · withdrawWithheldFromAccounts {sources: string[] (token ACCOUNT addresses, not owners), destination? (token account; default this wallet's ATA)} · harvestWithheldToMint {sources: string[]} (permissionless) · withdrawWithheldFromMint {destination?} · updateTransferHookProgram {programId: string | null (null clears the hook)} · pauseMint/resumeMint {} (wallet = pause authority) · closeMint {destination? (receives rent; default this wallet), confirmClose: true} (IRREVERSIBLE) · updateInterestRate {rate: integer bps/year, −32768…32767} (wallet = rate authority) · updateDefaultAccountState {state: \"initialized\" | \"frozen\"} (wallet = freeze authority) · setExtensionAuthority {kind: transferFeeConfig | withheldWithdraw | closeMint | interestRate | permanentDelegate | transferHookProgramId | metadataPointer | scaledUiAmount | pausable, newAuthority: address | null (+ confirmRevoke:true to revoke)}. NOTE: amount and maximumFee are base units (integer string, NOT human-readable) — \"1000000\" = 1 token at 6 decimals; \"1.5\" is rejected.",
         ),
         dryRun: z.boolean().optional().describe("Simulate without sending."),
         allowMainnet: z.literal(true).optional().describe("Required literal true for mainnet-beta."),
@@ -333,7 +382,13 @@ export function registerTokenTools(
         | "withdrawWithheldFromAccounts"
         | "harvestWithheldToMint"
         | "withdrawWithheldFromMint"
-        | "updateTransferHookProgram";
+        | "updateTransferHookProgram"
+        | "pauseMint"
+        | "resumeMint"
+        | "closeMint"
+        | "updateInterestRate"
+        | "updateDefaultAccountState"
+        | "setExtensionAuthority";
       params?: Record<string, unknown>;
       dryRun?: boolean;
       allowMainnet?: boolean;
@@ -509,7 +564,84 @@ export function registerTokenTools(
             ...(await updateTransferHookProgram(conn, { mint, authority: from, programId: raw }, opts)),
           };
         }
+        case "pauseMint":
+        case "resumeMint": {
+          const fn = args.action === "pauseMint" ? pauseMint : resumeMint;
+          return { action: args.action, ...(await fn(conn, { mint, authority: from }, opts)) };
+        }
+        case "closeMint": {
+          return {
+            action: args.action,
+            ...(await closeMint(
+              conn,
+              { mint, authority: from, destination: optionalStr("destination"), confirmClose: p.confirmClose === true },
+              opts,
+            )),
+          };
+        }
+        case "updateInterestRate": {
+          const rate = p.rate;
+          if (typeof rate !== "number") {
+            throw new Error("Missing params.rate — integer basis points per year (−32768…32767).");
+          }
+          return { action: args.action, ...(await updateInterestRate(conn, { mint, authority: from, rate }, opts)) };
+        }
+        case "updateDefaultAccountState": {
+          const state = p.state;
+          if (state !== "initialized" && state !== "frozen") {
+            throw new Error('Missing params.state — "initialized" or "frozen".');
+          }
+          return {
+            action: args.action,
+            ...(await updateDefaultAccountState(conn, { mint, freezeAuthority: from, state }, opts)),
+          };
+        }
+        case "setExtensionAuthority": {
+          const kind = p.kind;
+          if (typeof kind !== "string" || !(kind in EXTENSION_AUTHORITY_TYPES)) {
+            throw new Error(`Missing or unknown params.kind — one of: ${Object.keys(EXTENSION_AUTHORITY_TYPES).join(", ")}.`);
+          }
+          const raw = p.newAuthority;
+          if (raw !== null && typeof raw !== "string") {
+            throw new Error("Missing params.newAuthority — a base58 address, or null with confirmRevoke:true to revoke.");
+          }
+          return {
+            action: args.action,
+            kind,
+            ...(await setExtensionAuthority(conn, from, mint, kind as ExtensionAuthorityKind, raw, {
+              ...opts,
+              confirmRevoke: p.confirmRevoke === true,
+            })),
+          };
+        }
       }
+    }),
+  );
+
+  server.registerTool(
+    "find_withheld_accounts",
+    {
+      description:
+        "List token accounts of a Token-2022 transfer-fee mint that hold withheld fees (largest first): address, owner, withheldAmount (raw + display). Feed the addresses to manage_token2022 withdrawWithheldFromAccounts / harvestWithheldToMint `sources`. Read-only; uses getProgramAccounts, which some public mainnet RPCs disable or rate-limit.",
+      inputSchema: {
+        mint: z.string().describe("Token-2022 mint address."),
+        cluster: clusterParam(z, deps),
+      },
+    },
+    run(async (args: { mint: string; cluster?: string }) => {
+      const conn = connections.get(args.cluster);
+      const decimals = await tryDecimals(conn, new PublicKey(args.mint));
+      const accounts = await findWithheldAccounts(conn, args.mint);
+      const total = accounts.reduce((sum, a) => sum + BigInt(a.withheldAmount), 0n);
+      return {
+        cluster: conn.cluster,
+        mint: args.mint,
+        decimals: decimals ?? null,
+        count: accounts.length,
+        totalWithheld: total.toString(),
+        totalWithheldDisplay: display(total, decimals),
+        accounts: accounts.map((a) => ({ ...a, withheldDisplay: display(a.withheldAmount, decimals) })),
+      };
     }),
   );
 }

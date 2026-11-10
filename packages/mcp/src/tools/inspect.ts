@@ -5,12 +5,17 @@
  * decimals are known.
  */
 import {
+  decodeMetaplexMetadata,
   deriveTokenAddresses,
   inspectMint,
+  inspectSignedTransaction,
+  metaplexMetadataPda,
   inspectTokenAccount,
   inspectTransaction,
   type TransactionInspection,
 } from "@solwallet/core";
+
+import { PublicKey } from "@solana/web3.js";
 
 import { display, solDisplay } from "../amounts.js";
 import type { ToolDeps } from "../types.js";
@@ -45,7 +50,7 @@ export function registerInspectTools(
     "inspect_mint",
     {
       description:
-        "Read a mint: program (spl-token | token-2022), decimals, supply (raw + supplyDisplay), authorities and every Token-2022 extension decoded (TransferFeeConfig older/newer bps + maxFee + withheld, PermanentDelegate, TransferHook, ScaledUiAmount, MetadataPointer, TokenMetadata, InterestBearingConfig, DefaultAccountState, NonTransferable, ConfidentialTransferMint…), plus accountLen = expected ATA byte length.",
+        "Read a mint: program (spl-token | token-2022), decimals, supply (raw + supplyDisplay), authorities and every Token-2022 extension decoded (TransferFeeConfig older/newer bps + maxFee + withheld, PermanentDelegate, TransferHook, ScaledUiAmount, MetadataPointer, TokenMetadata, InterestBearingConfig, DefaultAccountState, NonTransferable, ConfidentialTransferMint…), plus accountLen = expected ATA byte length, and metaplexMetadata {name, symbol, uri, updateAuthority} when a Metaplex Token Metadata account exists (classic SPL tokens keep their name/symbol there; null otherwise).",
       inputSchema: {
         mint: z.string().describe("Mint address (base58)."),
         cluster: clusterParam(z, deps),
@@ -54,7 +59,14 @@ export function registerInspectTools(
     run(async (args: { mint: string; cluster?: string }) => {
       const conn = connections.get(args.cluster);
       const mint = await inspectMint(conn, args.mint);
-      return { cluster: conn.cluster, ...mint, supplyDisplay: display(mint.supply, mint.decimals) };
+      let metaplexMetadata: ReturnType<typeof decodeMetaplexMetadata> = null;
+      try {
+        const pda = await conn.connection.getAccountInfo(metaplexMetadataPda(new PublicKey(args.mint)));
+        metaplexMetadata = pda ? decodeMetaplexMetadata(pda.data) : null;
+      } catch {
+        metaplexMetadata = null; // best effort: the mint itself was read fine
+      }
+      return { cluster: conn.cluster, ...mint, supplyDisplay: display(mint.supply, mint.decimals), metaplexMetadata };
     }),
   );
 
@@ -118,6 +130,42 @@ export function registerInspectTools(
       return { cluster: conn.cluster, ...withDisplays(await inspectTransaction({ conn, signature: args.signature! })) };
     }),
   );
+
+  server.registerTool(
+    "inspect_raw_transaction",
+    {
+      description:
+        "Decode a serialized transaction (base58 / base64 / hex, auto-detected) — e.g. a signedTransaction that may never have landed. Offline: version, size, transaction id (first signature), fee payer, recentBlockhash, header, every signature ed25519-verified against the message (valid | invalid | missing), accounts with signer/writable flags (v0 lookup-table entries flagged), and every instruction with programName and a decoded {type, info} for System / Compute Budget / SPL Token / Token-2022 / Associated Token Account / Memo (others: raw dataHex). With checkChain (default true) it also resolves address lookup tables and reports `chain`: {status: processed | confirmed | finalized | not-found, slot, err, blockhashValid} — not-found + blockhashValid=false means expired or built for another cluster. When it landed, call inspect_transaction with the signature for execution results (balance changes, token movements).",
+      inputSchema: {
+        transaction: z.string().describe("Serialized transaction: base58, base64 or hex (0x optional)."),
+        checkChain: z
+          .boolean()
+          .optional()
+          .describe("Query the cluster for signature status, blockhash validity and lookup tables. Default true; false = fully offline."),
+        cluster: clusterParam(z, deps),
+      },
+    },
+    run(async (args: { transaction: string; checkChain?: boolean; cluster?: string }) => {
+      if (args.checkChain === false) {
+        return { cluster: null, ...rawWithDisplays(await inspectSignedTransaction(args.transaction)) };
+      }
+      const conn = connections.get(args.cluster);
+      return { cluster: conn.cluster, ...rawWithDisplays(await inspectSignedTransaction(args.transaction, conn)) };
+    }),
+  );
+}
+
+/** Lamport display hints for decoded raw-transaction instruction params. */
+function rawWithDisplays(tx: Awaited<ReturnType<typeof inspectSignedTransaction>>) {
+  return {
+    ...tx,
+    instructions: tx.instructions.map((ix) => {
+      const lamports = ix.decoded?.info.lamports;
+      return typeof lamports === "string" || typeof lamports === "number"
+        ? { ...ix, lamportsDisplay: solDisplay(String(lamports)) }
+        : ix;
+    }),
+  };
 }
 
 /** Add display hints next to the raw movement / balance-change figures (decimals known from the parsed tx). */

@@ -7,21 +7,21 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 
 给 AI 的操作规范。所有操作通过 solwallet MCP server 的工具完成；服务器默认连 devnet（`SOLWALLET_CLUSTER` 可改）。密钥只存在于服务器进程内存，重启即清空——这是测试工具，不是主网钱包。
 
-## 能力总览（29 个工具）
+## 能力总览（32 个工具）
 
 | 分组 | 工具 | 一句话 |
 |---|---|---|
-| 钱包（4） | `create_wallet` `import_wallet` `list_wallets` `export_secret` | 内存钱包的生命周期 |
+| 钱包（5） | `create_wallet` `import_wallet` `list_wallets` `export_secret` `remove_wallet` | 内存钱包的生命周期 |
 | 集群（3） | `get_cluster_status` `request_airdrop` `get_balances` | 健康、水龙头（`lamports`）、余额（raw `solLamports` / `amount` + `solDisplay` / `display` 提示，没有 `uiAmount`） |
 | 发送（3） | `transfer` `batch_transfer` `mixed_transfer` | 真正上链的转账；`transfer` 自带预检与全部构造旋钮 |
-| 观察（3） | `derive_address` `inspect_mint` `inspect_token_account` | 只读：ATA 推导（离线）、mint 扩展解码、代币账户扩展解码 |
+| 观察（4） | `derive_address` `inspect_mint` `inspect_token_account` `find_withheld_accounts` | 只读：ATA 推导（离线）、mint 扩展解码（含 Metaplex 元数据）、代币账户扩展解码、找有扣留费的账户 |
 | 构造（1） | `build_transfer` | 只构造不签不发：指令列表 + message hex + signers |
 | 预检（1） | `preflight_transfer` | 发送前读链判定 block / warn / info，见下文代码表 |
 | 原始交易（3） | `sign_transaction` `simulate_transaction` `send_transaction` | 对 hex / base64 序列化交易做部分签名、模拟、发送 |
-| 解析（1） | `inspect_transaction` | 签名或 getTransaction JSON → 代币流动、手续费、余额差、错误枚举名 |
+| 解析（2） | `inspect_transaction` `inspect_raw_transaction` | 签名或 getTransaction JSON → 代币 / SOL 流动、手续费、余额差、错误枚举名；序列化交易（可未上链）→ 签名校验、账户、逐条指令解码、链上状态 |
 | 委托（2） | `approve_delegate` `revoke_delegate` | 普通 delegate 的授权 / 撤销；划转本身走 `transfer` |
 | CPI（1） | `cpi_token_transfer` | 经 `solwallet_cpi` 转发程序发 transferChecked，让代币流动成为**内层指令**（`inspect_transaction` 的 `isInner: true`）；程序需已部署 |
-| 代币（2） | `create_token` `manage_token2022` | 建 mint（7 个预设 + `mintTo`）、15 个运行时动作 |
+| 代币（2） | `create_token` `manage_token2022` | 建 mint（7 个预设 + `mintTo`，SPL 可带 Metaplex 元数据）、21 个运行时动作 |
 | 多签（5） | `create_multisig` `propose_multisig` `approve_multisig` `execute_multisig` `get_multisig` | Squads V4 |
 
 预设（`create_token.preset`）：`plain-2022` / `transfer-fee` / `permanent-delegate` / `scaled-ui` / `transfer-hook` / `legacy-spl` / `memo-required`。预设只是默认值，显式字段覆盖。
@@ -33,6 +33,7 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 新建测试钱包 | `create_wallet` | 默认 12 词助记词；`strength: 256` 为 24 词；助记词不回显；同名已存在会报错，确认要替换才传 `overwrite: true` |
 | 用已有钱包（keyfile / 助记词） | `import_wallet` | `keyfileJson` 与 `mnemonic` 二选一，不能都传或都不传；同名保护同上 |
 | 看当前加载了哪些钱包 | `list_wallets` | 无参数，随时可调 |
+| 删除钱包 | `remove_wallet` | `confirmName` 必须等于 `walletName`；内存里的私钥随之丢失（先 `export_secret` 备份），链上资产不受影响 |
 | 备份 / 导出密钥 | `export_secret` | 仅用户明确要求时；`format: "keyfileJson"` 或 `"mnemonic"` + `dangerouslyAllowSecretExport: true` |
 | 集群健康（slot / 版本 / TPS） | `get_cluster_status` | 排查连接问题的第一步 |
 | 领测试 SOL | `request_airdrop` | `lamports` 传 base units（1 SOL = `"1000000000"`）；mainnet-beta 直接拒绝；公共水龙头 410 见下文 |
@@ -47,12 +48,17 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | 算某个钱包在某 mint 下的 ATA | `derive_address` | 离线；同时给 legacy 与 Token-2022 两个地址，二者必不同 |
 | 看 mint 有哪些扩展 / 费率 / 权限 | `inspect_mint` | `extensions[]` 已解码；`accountLen` 是该 mint 的 ATA 应有长度 |
 | 看某个代币账户状态 / 是否要求 memo / 扣留费 | `inspect_token_account` | 传 ATA 地址（不是钱包地址，先 `derive_address`） |
-| 解析一笔交易到底转了多少、扣了多少、为什么失败 | `inspect_transaction` | `signature`（在线）或 `json`（离线，粘 getTransaction 结果） |
+| 解析一笔交易到底转了多少、扣了多少、为什么失败 | `inspect_transaction` | `signature`（在线）或 `json`（离线，粘 getTransaction 结果）；`solMovements` / `solBalanceChanges` 是原生 SOL |
+| 看一笔序列化交易（signedTransaction，可能没上链）里有什么 | `inspect_raw_transaction` | `transaction` 传 base58 / base64 / hex；默认 `checkChain` 查是否上链与 blockhash 是否有效，`false` 纯离线；上链后用返回的 `signature` 调 `inspect_transaction` 看执行结果 |
 | 创建代币（SPL 或 Token-2022） | `create_token` | 给 `preset` 可省 `decimals`；`mintTo` 一步铸给指定钱包；返回 `mint` |
 | 铸造 / 销毁代币 | `manage_token2022` + `action: "mintTokens"` / `"burnTokens"` | SPL 与 Token-2022 通用；`params.amount` 和所有金额一样是 base units 整数串 |
 | 改费率 / 冻结解冻 / 换权限 / 改元数据 / 改显示倍率 / 改 hook 程序 | `manage_token2022` + 对应 `action` | 仅 Token-2022 mint；调用方钱包必须是对应 authority |
 | 让自己的收款账户强制要 memo | `manage_token2022` + `enableMemoTransfer` / `disableMemoTransfer` | 作用于**调用钱包自己的 ATA**（必要时自动创建并 realloc） |
-| 收转账费 | `manage_token2022` + `withdrawWithheldFromAccounts` / `harvestWithheldToMint` / `withdrawWithheldFromMint` | `sources` 传代币**账户**地址，不是钱包地址 |
+| 收转账费 | `find_withheld_accounts` → `manage_token2022` + `withdrawWithheldFromAccounts` / `harvestWithheldToMint` / `withdrawWithheldFromMint` | 先找出有扣留费的账户；`sources` 传代币**账户**地址，不是钱包地址 |
+| 暂停 / 恢复所有转账、铸造、销毁 | `manage_token2022` + `pauseMint` / `resumeMint` | mint 需带 Pausable 扩展（`create_token` 的 `extensions.pausable`），调用钱包是 pause authority |
+| 关闭 mint 回收租金 | `manage_token2022` + `closeMint` | 需 MintCloseAuthority 扩展、supply 为 0、`params.confirmClose: true`；不可逆 |
+| 改利率 / 新账户默认状态 | `manage_token2022` + `updateInterestRate` / `updateDefaultAccountState` | `params.rate` 是 bps/年（i16）；`params.state` 为 `initialized` / `frozen`，调用钱包须是 freeze authority |
+| 轮换 / 撤销某个扩展权限 | `manage_token2022` + `setExtensionAuthority` | `params.kind` 见工具描述；`newAuthority: null` + `confirmRevoke: true` 为撤销 |
 | 授权别人替我转 / 撤销 | `approve_delegate` / `revoke_delegate` | 之后 delegate 用 `transfer` + `sourceOwner` 划转 |
 | 替别人转（delegate / PermanentDelegate） | `transfer` + `walletName=<delegate>` + `sourceOwner=<owner>` | owner 不签名；PermanentDelegate 无需事先 approve |
 | 制造一笔"CPI 内层"代币转账（测解析器） | `cpi_token_transfer` | `programId` 必传（已部署的 `solwallet_cpi`）；`amount` 是 base units，`decimals` 可省；钱包自己是源 authority，无 PDA 托管 |

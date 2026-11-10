@@ -49,6 +49,11 @@ export class WalletStore {
     return w;
   }
 
+  /** Forget a wallet (in-memory only). Returns false when it was not loaded. */
+  remove(name: string): boolean {
+    return this.wallets.delete(name);
+  }
+
   list(): StoredWallet[] {
     return [...this.wallets.values()];
   }

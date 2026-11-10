@@ -147,6 +147,26 @@ export function registerWalletTools(
   })));
 
   server.registerTool(
+    "remove_wallet",
+    {
+      description:
+        "Forget a loaded wallet. Wallets live only in this server's memory, so the keypair is GONE unless it was backed up (export_secret) — the on-chain account and its funds are unaffected. Requires confirmName equal to walletName.",
+      inputSchema: {
+        walletName: z.string().describe("Wallet to remove."),
+        confirmName: z.string().describe("Must equal walletName exactly — explicit confirmation."),
+      },
+    },
+    run((args: { walletName: string; confirmName: string }) => {
+      const wallet = store.require(args.walletName);
+      if (args.confirmName !== args.walletName) {
+        throw new Error(`confirmName must equal walletName ("${args.walletName}") to remove it.`);
+      }
+      store.remove(args.walletName);
+      return { removed: args.walletName, address: wallet.keypair.publicKey.toBase58(), remaining: store.list().length };
+    }),
+  );
+
+  server.registerTool(
     "export_secret",
     {
       description:

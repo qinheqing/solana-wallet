@@ -109,6 +109,14 @@ async function setup() {
       }
       return Promise.resolve(null);
     }),
+    getProgramAccounts: vi.fn(() =>
+      Promise.resolve([
+        { pubkey: crafted.mint, account: { owner: TOKEN_2022_PROGRAM_ID, data: crafted.mintData, lamports: 1, executable: false } },
+        { pubkey: crafted.ata, account: { owner: TOKEN_2022_PROGRAM_ID, data: crafted.ataData, lamports: 1, executable: false } },
+      ]),
+    ),
+    getSignatureStatuses: vi.fn(() => Promise.resolve({ context: { slot: 1 }, value: [null] })),
+    isBlockhashValid: vi.fn(() => Promise.resolve({ context: { slot: 1 }, value: false })),
     getParsedTransaction: vi.fn((sig: string) =>
       Promise.resolve(sig === withdrawJson.transaction.signatures[0] ? withdrawJson : null),
     ),
@@ -210,5 +218,55 @@ describe("inspect tools (T-A / T-E) e2e", () => {
       signature: "dGu577XYHRcJRg763xnSBKgafeBwxHPWg9DxcGAexzWJ6DL8VtmnGmKqTTeAKjDszkiT6W2wCq45avs4sNC1be9",
     });
     expect(t.body(unknown).error.code).toBe("TRANSACTION_NOT_FOUND");
+  });
+});
+
+const RAW_TX_B58 =
+  "4HyFMSaVAQo5ZRVzZqJD5TNLk3tGxuv31AfonYmyHfQG2VUY7fuzM2LPZb7DYEd7ECneBgoSbQQq3fkuCMrXkLVCbBkKZjeuhnCokj9YFTDuhLtwdn9pYdVy6hjP9JgtjkbnjwF699riqBgca7vENPu2YfAxpNwxByHbDKTHzfonETwZ7RENFygGcUCABWpBeBJ4vE5fj1Jf33c5T9LYnTgDrfN2TTehgawcw9NBay9fFn6kNEiRsKoQzdAPSrwVF4D4xFbdm3r9M6qQpFfezi1Z9gbXCc6L5a8612KMRTDPVQ5Hv3cerFVxVVbshEdPEgSnbc4vPfqbsjG73KT5wUdbYNSEF9u8JQxmDEFqEvxF";
+
+describe("web ↔ MCP parity: read-only tools", () => {
+  let cleanup: (() => Promise<void>) | undefined;
+  afterEach(async () => { await cleanup?.(); cleanup = undefined; });
+
+  it("inspect_raw_transaction: offline decode, then chain status via RPC", async () => {
+    const t = await setup(); cleanup = t.cleanup;
+    const offline = t.body(await t.call("inspect_raw_transaction", { transaction: RAW_TX_B58, checkChain: false }));
+    expect(offline).toMatchObject({
+      cluster: null,
+      encoding: "base58",
+      signature: "dGu577XYHRcJRg763xnSBKgafeBwxHPWg9DxcGAexzWJ6DL8VtmnGmKqTTeAKjDszkiT6W2wCq45avs4sNC1be9",
+      allSignaturesValid: true,
+      chain: null,
+    });
+    expect(offline.instructions[2]).toMatchObject({
+      programName: "System Program",
+      decoded: { type: "transfer", info: { lamports: "5000000" } },
+      lamportsDisplay: "0.005 SOL",
+    });
+    expect(t.fake.getSignatureStatuses).not.toHaveBeenCalled();
+
+    const online = t.body(await t.call("inspect_raw_transaction", { transaction: RAW_TX_B58 }));
+    expect(online.chain).toEqual({ status: "not-found", slot: null, err: null, blockhashValid: false });
+    expect(online.warnings.join("\n")).toMatch(/not valid there/);
+
+    const bad = await t.call("inspect_raw_transaction", { transaction: "nope", checkChain: false });
+    expect(bad.isError).toBe(true);
+    expect(t.body(bad).error.code).toBe("RAW_TX_INVALID");
+  });
+
+  it("find_withheld_accounts lists token accounts with withheld fees (mint itself skipped)", async () => {
+    const t = await setup(); cleanup = t.cleanup;
+    const r = t.body(await t.call("find_withheld_accounts", { mint: t.crafted.mint.toBase58() }));
+    expect(r).toMatchObject({ decimals: 6, count: 1, totalWithheld: "9", totalWithheldDisplay: "0.000009 (6 dp)" });
+    expect(r.accounts).toEqual([
+      { address: t.crafted.ata.toBase58(), owner: t.crafted.owner.toBase58(), withheldAmount: "9", withheldDisplay: "0.000009 (6 dp)" },
+    ]);
+  });
+
+  it("inspect_mint reports metaplexMetadata: null when there is no Metaplex account", async () => {
+    const t = await setup(); cleanup = t.cleanup;
+    const r = t.body(await t.call("inspect_mint", { mint: t.crafted.mint.toBase58() }));
+    expect(r.metaplexMetadata).toBeNull();
+    expect(r.program).toBe("token-2022");
   });
 });
