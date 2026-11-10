@@ -8,6 +8,19 @@ Solana 钱包测试工具集：用自然语言驱动钱包生成、转账、批�
 
 定位是**测试工具**：密钥只活在 MCP 进程内存里，重启即清空；主网操作有显式确认守卫。不要把它当主网钱包用。
 
+## 功能截图
+<img width="1239" height="786" alt="image" src="https://github.com/user-attachments/assets/e017b5b1-f9cb-4f28-a3ec-5a5c12d2532c" />
+
+<img width="1237" height="856" alt="image" src="https://github.com/user-attachments/assets/32e1c233-fbc8-497e-9058-1ea3186e1554" />
+
+<img width="1239" height="743" alt="image" src="https://github.com/user-attachments/assets/6d90c5ec-9c38-4c06-ab4e-e8fdda087136" />
+
+<img width="1229" height="854" alt="image" src="https://github.com/user-attachments/assets/7a3072c6-2bdc-4588-96a6-214c14012e62" />
+
+<img width="1241" height="824" alt="image" src="https://github.com/user-attachments/assets/9482bbb2-e2a2-4b71-b794-16f4c4e9dce2" />
+
+
+
 ## 功能现状
 
 | 能力 | 状态 |
