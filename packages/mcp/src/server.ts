@@ -4,12 +4,15 @@
  * Dependencies are injectable for tests (InMemoryTransport + fake
  * connections); cli.ts uses the default production wiring.
  */
+import { readFileSync } from "node:fs";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseTransactionError, type ParsedProgramError } from "@sol-wallet/core";
 import { z, ZodError } from "zod";
 
 import { makeSanitizer } from "./output.js";
 import { registerCpiTools } from "./tools/cpi.js";
+import { registerGuideTools } from "./tools/guide.js";
 import { registerInspectTools } from "./tools/inspect.js";
 import { registerMultisigTools } from "./tools/multisig.js";
 import { registerRawTools } from "./tools/raw.js";
@@ -21,7 +24,32 @@ import type { ToolCallback, ToolDeps, ToolHandler } from "./types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export const SERVER_NAME = "solwallet-mcp";
-export const SERVER_VERSION = "0.1.0";
+/** Same as package.json (src/ and dist/ both sit one level below it). */
+export const SERVER_VERSION: string = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
+
+/**
+ * Injected into the client's context on connect, so the model knows the
+ * rules without a separately installed Skill. Details live in get_guide.
+ */
+export const SERVER_INSTRUCTIONS = [
+  "solwallet: Solana wallet TESTING server (devnet / testnet / local validator; mainnet only with explicit consent). Wallets live in server memory only.",
+  "",
+  "Rules:",
+  '- ALL amount inputs are integer strings in BASE UNITS (lamports; token base units). 1 SOL = "1000000000"; 1.5 tokens at 6 decimals = "1500000". "1.5" is rejected. Outputs keep raw values plus *Display hints.',
+  "- Token tools need `mint`; `decimals` is optional (read from the mint). `to` is a WALLET address; ATAs are derived.",
+  "- Errors: read error.suggestion (and error.custom for on-chain program errors) and act on it. Retry the same call at most once and only for RATE_LIMITED / BLOCKHASH_EXPIRED / network errors; otherwise fix the parameters.",
+  "- PREFLIGHT_BLOCKED: read preflight.findings and fix the cause; use force: true only when the user explicitly wants to test the on-chain failure.",
+  "- Never call export_secret unless the user asks to back up or export a key; never repeat exported secrets back.",
+  "- mainnet-beta sends: restate amount and recipient, get the user's OK, then pass allowMainnet: true.",
+  "- Ask before irreversible actions: revoking mint/freeze authority (null), closeMint, nonTransferable or permanent-delegate mints, overwrite: true on a wallet name clash.",
+  "- request_airdrop on public devnet/testnet RPCs returns FAUCET_UNAVAILABLE: suggest faucet.solana.com, a paid RPC URL as `cluster`, or a local validator.",
+  "",
+  "Common flows: create_wallet → get_cluster_status → get_balances → transfer (dryRun: true to simulate). Inspect: inspect_transaction (signature or JSON), inspect_raw_transaction (serialized tx, may not have landed).",
+  "",
+  "Before an unfamiliar or multi-step task (Token-2022 extensions, multisig, delegate / PermanentDelegate, raw signing, preflight codes, error codes), call get_guide with a topic: tool-selection, parameters, amounts, preflight-codes, workflows, examples, errors, faucet, red-lines, overview.",
+].join("\n");
 
 export interface McpServerOptions {
   /** Test seam: custom ClusterConnection factory (fake RPC in tests). */
@@ -32,10 +60,7 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
-      instructions:
-        "Solana wallet testing server. Workflow: create_wallet or import_wallet → get_cluster_status / request_airdrop (devnet/testnet only) → transfer / batch_transfer / mixed_transfer → get_balances. " +
-        "ALL amounts are integer strings in BASE UNITS, like a block explorer: lamports for SOL (1 SOL = \"1000000000\") and token base units for mints (1.5 tokens at 6 decimals = \"1500000\"); human-readable amounts such as \"1.5\" are rejected. Outputs keep the raw value and add *Display hints (amountDisplay, solDisplay, feeDisplay). Token transfers need mint; decimals is optional (read from the mint when omitted). " +
-        "mainnet-beta sends require allowMainnet: true (literal). Secrets never appear in output unless export_secret is called with dangerouslyAllowSecretExport: true.",
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
 
@@ -70,6 +95,8 @@ export function buildMcpServer(options: McpServerOptions = {}): McpServer {
   const deps: ToolDeps = { store, connections, sanitize, run };
 
   registerWalletTools(server, deps, z);
+  // Usage guide (SKILL.md) as get_guide + solwallet://guide resources.
+  registerGuideTools(server, z);
   registerTransferTools(server, deps, z);
   registerTokenTools(server, deps, z);
   registerMultisigTools(server, deps, z);

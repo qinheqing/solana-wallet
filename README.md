@@ -10,7 +10,7 @@ One core library, four ways to use it: MCP server · Claude Skill · Web console
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
-![MCP](https://img.shields.io/badge/MCP-29_tools-7C3AED)
+![MCP](https://img.shields.io/badge/MCP-33_tools-7C3AED)
 ![Solana](https://img.shields.io/badge/Solana-devnet%20%7C%20testnet%20%7C%20localnet-9945FF?logo=solana&logoColor=white)
 
 <img width="900" alt="Web console — dashboard" src="https://github.com/user-attachments/assets/e017b5b1-f9cb-4f28-a3ec-5a5c12d2532c" />
@@ -111,14 +111,14 @@ claude mcp add solwallet \
 
 </details>
 
-**Claude Skill.** [`skills/solana-wallet/SKILL.md`](./skills/solana-wallet/SKILL.md) is the AI-facing manual: workflows, the preflight code table, and end-to-end recipes. Load it alongside the MCP server so the model picks the right tool and parameters.
+**Usage guide, built in.** [`skills/solana-wallet/SKILL.md`](./skills/solana-wallet/SKILL.md) is the AI-facing manual: tool selection, the preflight code table, error handling, playbooks and end-to-end recipes. It ships inside `@sol-wallet/mcp`: the key rules are sent as server instructions when a client connects, and the model reads any section on demand with `get_guide` (also exposed as `solwallet://guide` resources). Nothing to install. Claude Code users can still copy the folder into `~/.claude/skills/` to have it as a Skill as well.
 
 ### Tools
 
-29 tools in 9 groups. Every sending tool accepts `dryRun: true` (simulate only) and `cluster` (cluster name or RPC URL).
+33 tools in 10 groups. Every sending tool accepts `dryRun: true` (simulate only) and `cluster` (cluster name or RPC URL).
 
 <details>
-<summary><b>Wallets & cluster (7)</b></summary>
+<summary><b>Wallets & cluster (8)</b></summary>
 
 | Tool | What it does |
 |---|---|
@@ -126,6 +126,7 @@ claude mcp add solwallet \
 | `import_wallet` | Import from keyfile JSON or a mnemonic (derivation path + passphrase supported) |
 | `list_wallets` | Names, addresses and sources (never secrets) |
 | `export_secret` | Export the mnemonic or keyfile JSON. Requires `dangerouslyAllowSecretExport: true` |
+| `remove_wallet` | Forget a loaded wallet (`confirmName` must equal the name) |
 | `get_cluster_status` | Slot, node version, approximate TPS |
 | `request_airdrop` | Faucet request (refused on mainnet-beta) |
 | `get_balances` | SOL plus every SPL / Token-2022 account |
@@ -146,7 +147,7 @@ claude mcp add solwallet \
 </details>
 
 <details>
-<summary><b>Raw transactions (3) · Inspection (4)</b></summary>
+<summary><b>Raw transactions (3) · Inspection (5)</b></summary>
 
 | Tool | What it does |
 |---|---|
@@ -154,24 +155,27 @@ claude mcp add solwallet \
 | `simulate_transaction` | Simulate a serialized transaction and return logs / CU / error |
 | `send_transaction` | Send a fully signed transaction with retry and confirmation |
 | `derive_address` | Derive the ATA for owner × mint under both token programs (offline) |
-| `inspect_mint` | Decimals, supply, authorities and every decoded Token-2022 extension |
+| `inspect_mint` | Decimals, supply, authorities, every decoded Token-2022 extension and Metaplex metadata |
 | `inspect_token_account` | Owner, amount, delegate, state and account-level extensions |
-| `inspect_transaction` | Token movements (inner/CPI aware), balance changes and decoded errors, from a signature or offline JSON |
+| `inspect_transaction` | Token and SOL movements (inner/CPI aware), balance changes and decoded errors, from a signature or offline JSON |
+| `inspect_raw_transaction` | Decode a serialized transaction that may never have landed: verified signatures, accounts, decoded instructions, optional on-chain status |
 
 </details>
 
 <details>
-<summary><b>Delegation (2) · CPI (1) · Tokens (2) · Multisig (5)</b></summary>
+<summary><b>Delegation (2) · CPI (1) · Tokens (3) · Multisig (5) · Guide (1)</b></summary>
 
 | Tool | What it does |
 |---|---|
 | `approve_delegate` / `revoke_delegate` | Grant or revoke a delegate allowance on an ATA |
 | `cpi_token_transfer` | Transfer through the bundled CPI forwarder program, so the movement shows up as an inner instruction |
-| `create_token` | Create an SPL / Token-2022 mint from one of 7 presets or explicit extensions, optionally minting supply in the same call |
-| `manage_token2022` | 15 runtime actions: mint, burn, set fee, freeze/thaw, change authorities, update metadata, scaled-UI multiplier, memo on/off, collect withheld fees, update hook program |
+| `create_token` | Create an SPL (optionally with Metaplex metadata) or Token-2022 mint from one of 7 presets or explicit extensions, optionally minting supply in the same call |
+| `manage_token2022` | 21 runtime actions: mint, burn, set fee, freeze/thaw, change authorities, update metadata, scaled-UI multiplier, memo on/off, collect withheld fees, update hook program, pause/resume, close mint, interest rate, default account state, extension authorities |
+| `find_withheld_accounts` | Token accounts of a transfer-fee mint that hold withheld fees |
 | `create_multisig` | Create a Squads V4 M-of-N multisig and return its multisig and vault PDAs |
 | `propose_multisig` / `approve_multisig` / `execute_multisig` | Propose, approve and execute a vault transfer |
 | `get_multisig` | Members, threshold, vault and every proposal with its votes |
+| `get_guide` | Read a section of the built-in usage guide (tool selection, preflight codes, errors, playbooks…) |
 
 </details>
 
@@ -263,7 +267,7 @@ The public devnet/testnet RPC faucets currently return HTTP 410, so `request_air
 ```
 packages/
   core/          @sol-wallet/core — connection, wallets, transfers, tokens, inspection, multisig (no UI deps)
-  mcp/           @sol-wallet/mcp  — 29 MCP tools, a thin layer over core (stdio)
+  mcp/           @sol-wallet/mcp  — 33 MCP tools, a thin layer over core (stdio)
   cpi-program/   Example Pinocchio program: authority-gated vault + transferChecked forwarder
 apps/web/        React + Vite console
 skills/          Claude Skill (SKILL.md)

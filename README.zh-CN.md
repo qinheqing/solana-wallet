@@ -10,7 +10,7 @@
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
-![MCP](https://img.shields.io/badge/MCP-29_tools-7C3AED)
+![MCP](https://img.shields.io/badge/MCP-33_tools-7C3AED)
 ![Solana](https://img.shields.io/badge/Solana-devnet%20%7C%20testnet%20%7C%20localnet-9945FF?logo=solana&logoColor=white)
 
 <img width="900" alt="Web 控制台：概览页" src="https://github.com/user-attachments/assets/e017b5b1-f9cb-4f28-a3ec-5a5c12d2532c" />
@@ -111,14 +111,14 @@ claude mcp add solwallet \
 
 </details>
 
-**Claude Skill**：[`skills/solana-wallet/SKILL.md`](./skills/solana-wallet/SKILL.md) 是写给 AI 看的使用手册，内容有操作流程、预检代码表和端到端组合示例。和 MCP Server 一起加载，模型更容易选对工具、传对参数。
+**内置使用手册**：[`skills/solana-wallet/SKILL.md`](./skills/solana-wallet/SKILL.md) 是写给 AI 看的使用手册，包括工具选择、预检代码表、错误处理、操作剧本和端到端示例。它已经打包进 `@sol-wallet/mcp`：客户端连接时，关键规则会作为服务器说明自动注入；模型需要细节时用 `get_guide` 按章节查阅（也以 `solwallet://guide` 资源提供）。不需要额外安装。Claude Code 用户如果想把它也作为 Skill 使用，仍可以把该目录复制到 `~/.claude/skills/`。
 
 ### 工具
 
-共 29 个，分 9 组。所有发送类工具都支持 `dryRun: true`（只模拟）和 `cluster`（集群名或 RPC URL）。
+共 33 个，分 10 组。所有发送类工具都支持 `dryRun: true`（只模拟）和 `cluster`（集群名或 RPC URL）。
 
 <details>
-<summary><b>钱包与集群（7）</b></summary>
+<summary><b>钱包与集群（8）</b></summary>
 
 | 工具 | 用途 |
 |---|---|
@@ -126,6 +126,7 @@ claude mcp add solwallet \
 | `import_wallet` | 从 keyfile JSON 或助记词导入，支持派生路径和 passphrase |
 | `list_wallets` | 列出名称、地址、来源，不含密钥 |
 | `export_secret` | 导出助记词或 keyfile JSON，必须传 `dangerouslyAllowSecretExport: true` |
+| `remove_wallet` | 删除已加载的钱包（`confirmName` 必须等于钱包名） |
 | `get_cluster_status` | slot、节点版本、近似 TPS |
 | `request_airdrop` | 向水龙头要 SOL（mainnet-beta 上直接拒绝） |
 | `get_balances` | SOL 和全部 SPL / Token-2022 账户余额 |
@@ -146,7 +147,7 @@ claude mcp add solwallet \
 </details>
 
 <details>
-<summary><b>原始交易（3）· 观察解析（4）</b></summary>
+<summary><b>原始交易（3）· 观察解析（5）</b></summary>
 
 | 工具 | 用途 |
 |---|---|
@@ -154,24 +155,27 @@ claude mcp add solwallet \
 | `simulate_transaction` | 模拟序列化交易，返回日志、CU 消耗和错误 |
 | `send_transaction` | 发送已签满的交易，自带重试与确认 |
 | `derive_address` | 离线推导 owner × mint 在两个代币程序下的 ATA |
-| `inspect_mint` | decimals、供应量、各类权限，以及全部 Token-2022 扩展的解码结果 |
+| `inspect_mint` | decimals、供应量、各类权限、全部 Token-2022 扩展的解码结果，以及 Metaplex 元数据 |
 | `inspect_token_account` | owner、余额、delegate、状态和账户级扩展 |
-| `inspect_transaction` | 按签名在线读取或用 JSON 离线解析：代币流向（识别 CPI 内层）、余额变化、错误解码 |
+| `inspect_transaction` | 按签名在线读取或用 JSON 离线解析：代币和 SOL 流向（识别 CPI 内层）、余额变化、错误解码 |
+| `inspect_raw_transaction` | 解码序列化交易（可以没上链）：签名校验、账户、逐条指令解码，可选查询链上状态 |
 
 </details>
 
 <details>
-<summary><b>委托（2）· CPI（1）· 代币（2）· 多签（5）</b></summary>
+<summary><b>委托（2）· CPI（1）· 代币（3）· 多签（5）· 手册（1）</b></summary>
 
 | 工具 | 用途 |
 |---|---|
 | `approve_delegate` / `revoke_delegate` | 给 ATA 授权或撤销 delegate 额度 |
 | `cpi_token_transfer` | 经仓库自带的 CPI 转发程序转账，让这笔流动以内层指令的形式出现 |
-| `create_token` | 用 7 个预设之一或手动指定扩展创建 SPL / Token-2022 mint，可顺带铸币 |
-| `manage_token2022` | 15 个运行时操作：铸造、销毁、改费率、冻结 / 解冻、换权限、改元数据、显示倍率、开关 memo、提取扣留费、换 hook 程序 |
+| `create_token` | 用 7 个预设之一或手动指定扩展创建 SPL（可带 Metaplex 元数据）/ Token-2022 mint，可顺带铸币 |
+| `manage_token2022` | 21 个运行时操作：铸造、销毁、改费率、冻结 / 解冻、换权限、改元数据、显示倍率、开关 memo、提取扣留费、换 hook 程序、暂停 / 恢复、关闭 mint、改利率、默认账户状态、扩展权限 |
+| `find_withheld_accounts` | 列出转账费 mint 下有扣留费的代币账户 |
 | `create_multisig` | 创建 Squads V4 M-of-N 多签，返回多签 PDA 和金库 PDA |
 | `propose_multisig` / `approve_multisig` / `execute_multisig` | 对金库转账发起提案、批准、执行 |
 | `get_multisig` | 成员、阈值、金库，以及每个提案和投票情况 |
+| `get_guide` | 按章节读取内置使用手册（工具选择、预检代码、错误处理、剧本……） |
 
 </details>
 
@@ -263,7 +267,7 @@ devnet / testnet 的公共 RPC 水龙头目前返回 HTTP 410，`request_airdrop
 ```
 packages/
   core/          @sol-wallet/core：连接、钱包、转账、代币、观察解析、多签（不依赖任何 UI）
-  mcp/           @sol-wallet/mcp：29 个 MCP 工具，薄薄一层调用 core（stdio）
+  mcp/           @sol-wallet/mcp：33 个 MCP 工具，薄薄一层调用 core（stdio）
   cpi-program/   示例 Pinocchio 程序：带 authority 校验的金库 + transferChecked 转发
 apps/web/        React + Vite 控制台
 skills/          Claude Skill（SKILL.md）

@@ -1,6 +1,6 @@
 {
   "name": "@sol-wallet/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server exposing solana-wallet testing tools to AI clients",
   "keywords": [
     "mcp",
@@ -37,7 +37,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc --project tsconfig.json && node scripts/copy-guide.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --root ../.. packages/mcp",
     "prepublishOnly": "pnpm run build"

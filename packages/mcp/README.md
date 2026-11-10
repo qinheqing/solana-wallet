@@ -36,7 +36,7 @@ Requires Node.js 20 or later.
 
 ## What it can do
 
-32 tools, grouped:
+33 tools, grouped:
 
 - **Wallets**: `create_wallet`, `import_wallet`, `list_wallets`, `export_secret`, `remove_wallet`
 - **Cluster**: `get_cluster_status`, `request_airdrop`, `get_balances`
@@ -45,6 +45,11 @@ Requires Node.js 20 or later.
 - **Tokens**: `create_token` (SPL with Metaplex metadata, or Token-2022 with extensions), `manage_token2022` (21 runtime actions), `find_withheld_accounts`
 - **Multisig (Squads v4)**: `create_multisig`, `propose_multisig`, `approve_multisig`, `execute_multisig`, `get_multisig`
 - **Inspection**: `derive_address`, `inspect_mint`, `inspect_token_account`, `inspect_transaction`, `inspect_raw_transaction`
+- **Guide**: `get_guide`
+
+## Built-in usage guide
+
+No Skill or extra setup needed. When a client connects, the server sends its key rules (amount units, error handling, red lines) as MCP instructions. The full manual (tool selection, preflight codes, error codes, playbooks and end-to-end recipes) is bundled in the package: the model reads a section with `get_guide({ topic })`, and clients that support resources can open `solwallet://guide` or `solwallet://guide/<topic>`.
 
 All amounts are **base units** (lamports / token base units) as integer strings, with `*Display` hints next to them. Sending on `mainnet-beta` requires an explicit `allowMainnet: true`.
 

@@ -1,13 +1,13 @@
 ---
 name: solana-wallet
-description: Solana 钱包与转账测试工具集（solwallet MCP server）。当用户提到 Solana 测试、devnet / testnet / localnet 操作、生成或导入测试钱包、领测试 SOL（airdrop / 水龙头）、SOL / SPL / Token-2022 转账测试、批量转账或空投模拟、混合多币转账、查钱包余额、交易 dry-run 模拟、创建代币 / Token-2022 扩展与运行时管理（铸造、销毁、费率、冻结、权限、元数据、MemoTransfer、费用提取）、代币预设模板、转账预检（transfer hook / memo / 冻结 / 费率）、只构造不发送（指令列表、message hex）、离线签名 / 模拟 / 发送外部交易、解析交易（代币流动、手续费、链上错误枚举名）、ATA 推导、mint / 代币账户观察、委托与 PermanentDelegate 划转、经 CPI 转发程序制造内层转账、Squads 多签（创建 / 提案 / 批准 / 执行）时使用。通过 29 个 MCP 工具执行，本 Skill 提供工具选择决策、参数约定、标准工作流、组合示例与错误自纠错规则。
+description: Solana 钱包与转账测试工具集（solwallet MCP server）。当用户提到 Solana 测试、devnet / testnet / localnet 操作、生成或导入测试钱包、领测试 SOL（airdrop / 水龙头）、SOL / SPL / Token-2022 转账测试、批量转账或空投模拟、混合多币转账、查钱包余额、交易 dry-run 模拟、创建代币 / Token-2022 扩展与运行时管理（铸造、销毁、费率、冻结、权限、元数据、MemoTransfer、费用提取）、代币预设模板、转账预检（transfer hook / memo / 冻结 / 费率）、只构造不发送（指令列表、message hex）、离线签名 / 模拟 / 发送外部交易、解析交易（代币流动、手续费、链上错误枚举名）、ATA 推导、mint / 代币账户观察、委托与 PermanentDelegate 划转、经 CPI 转发程序制造内层转账、Squads 多签（创建 / 提案 / 批准 / 执行）时使用。通过 33 个 MCP 工具执行，本 Skill 提供工具选择决策、参数约定、标准工作流、组合示例与错误自纠错规则。
 ---
 
 # solana-wallet 使用手册
 
 给 AI 的操作规范。所有操作通过 solwallet MCP server 的工具完成；服务器默认连 devnet（`SOLWALLET_CLUSTER` 可改）。密钥只存在于服务器进程内存，重启即清空——这是测试工具，不是主网钱包。
 
-## 能力总览（32 个工具）
+## 能力总览（33 个工具）
 
 | 分组 | 工具 | 一句话 |
 |---|---|---|
@@ -23,6 +23,7 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | CPI（1） | `cpi_token_transfer` | 经 `solwallet_cpi` 转发程序发 transferChecked，让代币流动成为**内层指令**（`inspect_transaction` 的 `isInner: true`）；程序需已部署 |
 | 代币（2） | `create_token` `manage_token2022` | 建 mint（7 个预设 + `mintTo`，SPL 可带 Metaplex 元数据）、21 个运行时动作 |
 | 多签（5） | `create_multisig` `propose_multisig` `approve_multisig` `execute_multisig` `get_multisig` | Squads V4 |
+| 手册（1） | `get_guide` | 按主题读取本手册（MCP 内置，同内容），见下文各章节 |
 
 预设（`create_token.preset`）：`plain-2022` / `transfer-fee` / `permanent-delegate` / `scaled-ui` / `transfer-hook` / `legacy-spl` / `memo-required`。预设只是默认值，显式字段覆盖。
 

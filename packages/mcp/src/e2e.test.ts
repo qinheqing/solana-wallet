@@ -28,6 +28,7 @@ import {
 import { makeSanitizer } from "./output.js";
 import { buildMcpServer } from "./server.js";
 import { WalletStore } from "./state.js";
+import { GUIDE_TOPICS } from "./guide.js";
 
 // --- fake ClusterConnection plumbing ---------------------------------------
 
@@ -152,6 +153,8 @@ const TOOL_NAMES = [
   "remove_wallet",
   "find_withheld_accounts",
   "inspect_raw_transaction",
+  // built-in usage guide
+  "get_guide",
 ];
 
 describe("solwallet MCP server (11.6)", () => {
@@ -1450,6 +1453,44 @@ describe("web ↔ MCP parity tools", () => {
     });
     expect(res.isError).toBe(true);
     expect(t.text(res)).toMatch(/extensions\.tokenMetadata/);
+    await t.cleanup();
+  });
+});
+
+describe("built-in usage guide (no Skill install needed)", () => {
+  it("sends the key rules as server instructions on connect", async () => {
+    const t = await setup();
+    const instructions = t.client.getInstructions() ?? "";
+    expect(instructions).toMatch(/BASE UNITS/);
+    expect(instructions).toMatch(/get_guide/);
+    expect(instructions).toMatch(/export_secret/);
+    expect(instructions.length).toBeLessThan(3000); // stays cheap in every context
+    await t.cleanup();
+  });
+
+  it("get_guide returns plain markdown for every topic (each maps to a SKILL.md section)", async () => {
+    const t = await setup();
+    for (const [topic, heading] of Object.entries(GUIDE_TOPICS)) {
+      const res = await t.call("get_guide", { topic });
+      expect(res.isError, topic).toBeFalsy();
+      expect(t.text(res).startsWith(`## ${heading}`), topic).toBe(true);
+    }
+    const all = t.text(await t.call("get_guide", { topic: "all" }));
+    expect(all.startsWith("---")).toBe(false); // front matter stripped
+    expect(all).toMatch(/## 红线/);
+    const bad = await t.call("get_guide", { topic: "nope" });
+    expect(bad.isError).toBe(true);
+    await t.cleanup();
+  });
+
+  it("exposes the guide as resources", async () => {
+    const t = await setup();
+    const { resources } = await t.client.listResources();
+    const uris = resources.map((r) => r.uri);
+    expect(uris).toContain("solwallet://guide");
+    expect(uris).toContain("solwallet://guide/preflight-codes");
+    const read = await t.client.readResource({ uri: "solwallet://guide/errors" });
+    expect((read.contents[0] as { text: string }).text).toMatch(/^## 错误处理/);
     await t.cleanup();
   });
 });
