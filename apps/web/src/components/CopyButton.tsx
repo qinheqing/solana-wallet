@@ -57,16 +57,27 @@ export function CopyIcon({ text }: { text: string }) {
 export function Address({
   value,
   copy = true,
+  short = false,
   className = "",
   empty,
 }: {
   value: string | null | undefined;
   copy?: boolean;
+  /** Render `abcde…vwxyz` (full key on hover, copy still copies the full key). */
+  short?: boolean;
   className?: string;
   /** Rendered when value is null/empty. */
   empty?: ReactNode;
 }) {
   if (!value) return <span className="text-zinc-500">{empty ?? "—"}</span>;
+  if (short) {
+    return (
+      <span className={`whitespace-nowrap font-mono ${className}`} title={value}>
+        {shortKey(value, 5)}
+        {copy && <CopyIcon text={value} />}
+      </span>
+    );
+  }
   return (
     <span className={`break-all font-mono ${className}`}>
       {value}
