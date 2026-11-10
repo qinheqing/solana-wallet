@@ -63,14 +63,14 @@ Then pick how you want to use it:
 | Write test scripts in TypeScript | [Library](#library) |
 
 > [!NOTE]
-> The npm packages (`@solwallet/core`, `@solwallet/mcp`) are not published yet. For now, run everything from a clone.
+> The MCP server and the library are on npm as [`@sol-wallet/mcp`](https://www.npmjs.com/package/@sol-wallet/mcp) and [`@sol-wallet/core`](https://www.npmjs.com/package/@sol-wallet/core). The web console runs from a clone.
 
 ## MCP server
 
 **Claude Code**
 
 ```bash
-claude mcp add solwallet -- node /ABSOLUTE/PATH/solana-wallet/packages/mcp/dist/cli.js
+claude mcp add solwallet -- npx -y @sol-wallet/mcp
 ```
 
 Restart Claude Code and try: *"Create a wallet called alice, check the devnet cluster status, then show her balances."*
@@ -84,8 +84,8 @@ Add this to your client's MCP config (`.mcp.json`, `~/.cursor/mcp.json`, `claude
 {
   "mcpServers": {
     "solwallet": {
-      "command": "node",
-      "args": ["/ABSOLUTE/PATH/solana-wallet/packages/mcp/dist/cli.js"],
+      "command": "npx",
+      "args": ["-y", "@sol-wallet/mcp"],
       "env": { "SOLWALLET_CLUSTER": "devnet" }
     }
   }
@@ -101,12 +101,12 @@ Add this to your client's MCP config (`.mcp.json`, `~/.cursor/mcp.json`, `claude
 # Paid RPC endpoint
 claude mcp add solwallet \
   -e SOLWALLET_CLUSTER="https://devnet.helius-rpc.com/?api-key=YOUR_KEY" \
-  -- node /ABSOLUTE/PATH/solana-wallet/packages/mcp/dist/cli.js
+  -- npx -y @sol-wallet/mcp
 
 # Local solana-test-validator
 claude mcp add solwallet \
   -e SOLWALLET_CLUSTER=http://127.0.0.1:8899 \
-  -- node /ABSOLUTE/PATH/solana-wallet/packages/mcp/dist/cli.js
+  -- npx -y @sol-wallet/mcp
 ```
 
 </details>
@@ -217,7 +217,7 @@ A local, single-page console built on the same core library. It switches between
 
 ```ts
 import { Keypair } from "@solana/web3.js";
-import { createConnection, transfer, solToLamports, parseAmount } from "@solwallet/core";
+import { createConnection, transfer, solToLamports, parseAmount } from "@sol-wallet/core";
 
 const conn = createConnection("devnet"); // or a full RPC URL
 const from = Keypair.fromSecretKey(/* 64-byte secret key */);
@@ -262,8 +262,8 @@ The public devnet/testnet RPC faucets currently return HTTP 410, so `request_air
 
 ```
 packages/
-  core/          @solwallet/core — connection, wallets, transfers, tokens, inspection, multisig (no UI deps)
-  mcp/           @solwallet/mcp  — 29 MCP tools, a thin layer over core (stdio)
+  core/          @sol-wallet/core — connection, wallets, transfers, tokens, inspection, multisig (no UI deps)
+  mcp/           @sol-wallet/mcp  — 29 MCP tools, a thin layer over core (stdio)
   cpi-program/   Example Pinocchio program: authority-gated vault + transferChecked forwarder
 apps/web/        React + Vite console
 skills/          Claude Skill (SKILL.md)
@@ -289,5 +289,5 @@ node packages/mcp/smoke-client.mjs   # live smoke test (set SOLWALLET_CLUSTER fo
 
 ## Roadmap
 
-- [ ] Publish `@solwallet/core` and `@solwallet/mcp` to npm (enables `npx @solwallet/mcp`)
+- [x] Publish `@sol-wallet/core` and `@sol-wallet/mcp` to npm (`npx @sol-wallet/mcp`)
 - [ ] Continue polishing the Web console

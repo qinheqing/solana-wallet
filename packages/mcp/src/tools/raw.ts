@@ -2,9 +2,9 @@
  * Raw transaction tools (PRD T-D): sign / simulate / send a serialized
  * transaction supplied as hex or base64. Lets an external service build a
  * payload for us to sign, or lets us build one (build_transfer) for an
- * external submitter. All logic lives in @solwallet/core (raw.ts).
+ * external submitter. All logic lives in @sol-wallet/core (raw.ts).
  */
-import { sendRaw, signTransactionHex, simulateRaw } from "@solwallet/core";
+import { sendRaw, signTransactionHex, simulateRaw } from "@sol-wallet/core";
 
 import type { ToolDeps } from "../types.js";
 

@@ -63,14 +63,14 @@ pnpm install && pnpm build
 | 用 TypeScript 写测试脚本 | [作为库使用](#作为库使用) |
 
 > [!NOTE]
-> npm 包（`@solwallet/core`、`@solwallet/mcp`）还没发布，目前请从 clone 下来的仓库运行。
+> MCP Server 和库已发布到 npm：[`@sol-wallet/mcp`](https://www.npmjs.com/package/@sol-wallet/mcp)、[`@sol-wallet/core`](https://www.npmjs.com/package/@sol-wallet/core)。Web 控制台需从 clone 下来的仓库运行。
 
 ## MCP Server
 
 **Claude Code**
 
 ```bash
-claude mcp add solwallet -- node /绝对路径/solana-wallet/packages/mcp/dist/cli.js
+claude mcp add solwallet -- npx -y @sol-wallet/mcp
 ```
 
 重启 Claude Code，试试：*「新建一个叫 alice 的钱包，看下 devnet 集群状态，再查她的余额。」*
@@ -84,8 +84,8 @@ claude mcp add solwallet -- node /绝对路径/solana-wallet/packages/mcp/dist/c
 {
   "mcpServers": {
     "solwallet": {
-      "command": "node",
-      "args": ["/绝对路径/solana-wallet/packages/mcp/dist/cli.js"],
+      "command": "npx",
+      "args": ["-y", "@sol-wallet/mcp"],
       "env": { "SOLWALLET_CLUSTER": "devnet" }
     }
   }
@@ -101,12 +101,12 @@ claude mcp add solwallet -- node /绝对路径/solana-wallet/packages/mcp/dist/c
 # 付费 RPC
 claude mcp add solwallet \
   -e SOLWALLET_CLUSTER="https://devnet.helius-rpc.com/?api-key=YOUR_KEY" \
-  -- node /绝对路径/solana-wallet/packages/mcp/dist/cli.js
+  -- npx -y @sol-wallet/mcp
 
 # 本地 solana-test-validator
 claude mcp add solwallet \
   -e SOLWALLET_CLUSTER=http://127.0.0.1:8899 \
-  -- node /绝对路径/solana-wallet/packages/mcp/dist/cli.js
+  -- npx -y @sol-wallet/mcp
 ```
 
 </details>
@@ -217,7 +217,7 @@ pnpm dev   # → http://localhost:5173
 
 ```ts
 import { Keypair } from "@solana/web3.js";
-import { createConnection, transfer, solToLamports, parseAmount } from "@solwallet/core";
+import { createConnection, transfer, solToLamports, parseAmount } from "@sol-wallet/core";
 
 const conn = createConnection("devnet"); // 也可以传完整 RPC URL
 const from = Keypair.fromSecretKey(/* 64 字节 secretKey */);
@@ -262,8 +262,8 @@ devnet / testnet 的公共 RPC 水龙头目前返回 HTTP 410，`request_airdrop
 
 ```
 packages/
-  core/          @solwallet/core：连接、钱包、转账、代币、观察解析、多签（不依赖任何 UI）
-  mcp/           @solwallet/mcp：29 个 MCP 工具，薄薄一层调用 core（stdio）
+  core/          @sol-wallet/core：连接、钱包、转账、代币、观察解析、多签（不依赖任何 UI）
+  mcp/           @sol-wallet/mcp：29 个 MCP 工具，薄薄一层调用 core（stdio）
   cpi-program/   示例 Pinocchio 程序：带 authority 校验的金库 + transferChecked 转发
 apps/web/        React + Vite 控制台
 skills/          Claude Skill（SKILL.md）
@@ -289,5 +289,5 @@ node packages/mcp/smoke-client.mjs   # 真实链冒烟测试（本地链请设�
 
 ## 路线图
 
-- [ ] 发布 `@solwallet/core` 和 `@solwallet/mcp` 到 npm（之后可直接 `npx @solwallet/mcp`）
+- [x] 发布 `@sol-wallet/core` 和 `@sol-wallet/mcp` 到 npm（`npx @sol-wallet/mcp`）
 - [ ] 继续完善 Web 控制台

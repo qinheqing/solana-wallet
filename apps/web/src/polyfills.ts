@@ -3,7 +3,7 @@
  *
  * ES imports are hoisted and evaluated in dependency order, so a Buffer
  * assignment placed after the imports in main.tsx runs too late:
- * @solana/spl-token-metadata (pulled in via @solwallet/core) calls
+ * @solana/spl-token-metadata (pulled in via @sol-wallet/core) calls
  * Buffer.from at module top level and throws ReferenceError on first paint.
  *
  * This module has no imports other than `buffer` and is imported as the very

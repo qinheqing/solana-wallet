@@ -20,7 +20,7 @@ import {
   type MixedLeg,
   type PreflightResult,
   type TransferInstructionKind,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
 import {

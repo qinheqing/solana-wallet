@@ -1,5 +1,5 @@
 /**
- * Token tools — wired to @solwallet/core task #8 (mint creation, SPL +
+ * Token tools — wired to @sol-wallet/core task #8 (mint creation, SPL +
  * Token-2022 with extensions) and task #9 (mint/burn + Token-2022 runtime
  * management). Multisig tools live in ./multisig.ts (task #10).
  */
@@ -34,7 +34,7 @@ import {
   TOKEN_PRESETS,
   type Token2022ExtensionOptions,
   type TokenPresetName,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 

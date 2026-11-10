@@ -11,7 +11,7 @@
  * Display strings are derived with core's exact bigint formatter — they are
  * never used as inputs.
  */
-import { formatAmount, inspectMint, type ClusterConnection } from "@solwallet/core";
+import { formatAmount, inspectMint, type ClusterConnection } from "@sol-wallet/core";
 import type { PublicKey } from "@solana/web3.js";
 
 export const SOL_DECIMALS = 9;

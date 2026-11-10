@@ -18,7 +18,7 @@ import {
   inspectTokenAccount,
   inspectTransaction,
   transfer,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 
 import { assertOk, connect, displayAmount, ensureFunded, expect, loadPayer, log, runExample, short, txRef } from "./lib.js";
 

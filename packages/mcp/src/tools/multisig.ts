@@ -1,7 +1,7 @@
 /**
  * Multisig tools (task #10): Squads V4 M-of-N creation and the
  * propose → approve → execute lifecycle, plus read-only state queries.
- * All on-chain actions run through @solwallet/core (dryRun + sendWithRetry).
+ * All on-chain actions run through @sol-wallet/core (dryRun + sendWithRetry).
  */
 import {
   approveMultisigProposal,
@@ -12,7 +12,7 @@ import {
   executeMultisigProposal,
   getMultisigState,
   listProposals,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 import { PublicKey } from "@solana/web3.js";
 
 import { baseUnitParam, DECIMALS_OPTIONAL_DESC, display, parseBaseUnits, resolveDecimals, SOL_DECIMALS, solDisplay } from "../amounts.js";

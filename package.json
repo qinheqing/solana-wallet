@@ -15,11 +15,11 @@
     "typecheck": "pnpm -r run typecheck && pnpm run typecheck:examples",
     "typecheck:examples": "tsc -p examples/tsconfig.json",
     "example": "tsx",
-    "dev": "pnpm --filter @solwallet/web dev"
+    "dev": "pnpm --filter @sol-wallet/web dev"
   },
   "devDependencies": {
     "@solana/web3.js": "^1.99.0",
-    "@solwallet/core": "workspace:*",
+    "@sol-wallet/core": "workspace:*",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "3.2.7",
     "tsx": "^4.23.15",

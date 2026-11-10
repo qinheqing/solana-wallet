@@ -166,12 +166,12 @@ importers:
 
   .:
     devDependencies:
+      '@sol-wallet/core':
+        specifier: workspace:*
+        version: link:packages/core
       '@solana/web3.js':
         specifier: ^1.99.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@solwallet/core':
-        specifier: workspace:*
-        version: link:packages/core
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
@@ -193,12 +193,12 @@ importers:
 
   apps/web:
     dependencies:
+      '@sol-wallet/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@solana/web3.js':
         specifier: ^1.98.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@solwallet/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
@@ -282,15 +282,15 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
         version: 1.32.2(supports-color@7.2.0)(zod@3.25.76)
+      '@sol-wallet/core':
+        specifier: workspace:^
+        version: link:../core
       '@solana/spl-token':
         specifier: ^0.4.9
         version: 0.4.15(@solana/web3.js@1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@5.9.3)(utf-8-validate@6.0.6)
       '@solana/web3.js':
         specifier: ^1.98.0
         version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@solwallet/core':
-        specifier: workspace:*
-        version: link:../core
       zod:
         specifier: ^3.24.0
         version: 3.25.76

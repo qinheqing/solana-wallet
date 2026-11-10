@@ -1,7 +1,7 @@
 # cpi-program (`solwallet_cpi`)
 
 Minimal native Solana program (framework: [pinocchio](https://github.com/anza-xyz/pinocchio),
-no Anchor, no borsh) used by `@solwallet/core` to exercise CPI code paths:
+no Anchor, no borsh) used by `@sol-wallet/core` to exercise CPI code paths:
 
 - **PDA vault batch payouts** (task #7): `initialize_vault` + `batch_transfer`, authority-gated.
 - **Token CPI forwarder** (PRD T-I, task #23): `forward_transfer_checked` CPIs

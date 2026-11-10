@@ -1,5 +1,5 @@
 //! `solwallet_cpi` — minimal Solana BPF program for testing CPI batch
-//! transfers from `@solwallet/core` (task #7, F4.4).
+//! transfers from `@sol-wallet/core` (task #7, F4.4).
 //!
 //! Framework: [pinocchio](https://github.com/anza-xyz/pinocchio) — a
 //! zero-dependency, no-alloc program framework. Chosen over Anchor because

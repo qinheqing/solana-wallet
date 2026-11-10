@@ -1,5 +1,5 @@
 /**
- * @solwallet/core — Solana wallet testing library.
+ * @sol-wallet/core — Solana wallet testing library.
  *
  * Zero UI dependencies. All modules (connection, wallet, transfer, token,
  * multisig) are built on this package.

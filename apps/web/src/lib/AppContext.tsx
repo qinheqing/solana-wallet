@@ -15,7 +15,7 @@ import {
   encryptJson,
   parseKeypairJson,
   type EncryptedKeystoreV1,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 
 import { genId, loadSettings, loadWallets, saveSettings, saveWallets } from "./storage";
 import type { ClusterName, KeypairBytes, StoredWalletRecord } from "./types";

@@ -1,6 +1,6 @@
 # examples/
 
-只用 `@solwallet/core` 写的三个端到端脚本，对应 SKILL.md「组合示例」A / B / C。每个脚本把一份 JSON 报告打到 stdout（签名、`explorerUrl`、解析结果），日志打到 stderr；密钥永远不出现在输出里。
+只用 `@sol-wallet/core` 写的三个端到端脚本，对应 SKILL.md「组合示例」A / B / C。每个脚本把一份 JSON 报告打到 stdout（签名、`explorerUrl`、解析结果），日志打到 stderr；密钥永远不出现在输出里。
 
 | 脚本 | 验证什么 |
 |---|---|
@@ -17,13 +17,13 @@
 solana-test-validator --reset
 
 # 终端 2（仓库根目录）
-pnpm install && pnpm --filter @solwallet/core build
+pnpm install && pnpm --filter @sol-wallet/core build
 pnpm example examples/fee-mint-net-amount.ts
 pnpm example examples/memo-block-and-force.ts
 pnpm example examples/permanent-delegate-transfer.ts
 ```
 
-`pnpm example` 就是 `tsx`，`@solwallet/core` 从 `packages/core/dist` 解析，所以先 build。`examples/package.json` 里的 `"type": "module"` 只是让 tsx 按 ESM 运行（脚本用顶层 `await`），这个目录不是 workspace 包。启动时的 `bigint: Failed to load bindings` 警告来自 web3.js 的可选原生依赖，可忽略。
+`pnpm example` 就是 `tsx`，`@sol-wallet/core` 从 `packages/core/dist` 解析，所以先 build。`examples/package.json` 里的 `"type": "module"` 只是让 tsx 按 ESM 运行（脚本用顶层 `await`），这个目录不是 workspace 包。启动时的 `bigint: Failed to load bindings` 警告来自 web3.js 的可选原生依赖，可忽略。
 
 环境变量（都有默认值，不要把密钥写进脚本）：
 

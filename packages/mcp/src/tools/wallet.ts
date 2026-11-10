@@ -9,7 +9,7 @@ import {
   serializeKeypairJson,
   toSafeWalletView,
   type ClusterConnection,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 import { PublicKey } from "@solana/web3.js";
 
 import { baseUnitParam, display, parseBaseUnits, solDisplay } from "../amounts.js";

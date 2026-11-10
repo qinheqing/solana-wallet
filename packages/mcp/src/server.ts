@@ -5,7 +5,7 @@
  * connections); cli.ts uses the default production wiring.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { parseTransactionError, type ParsedProgramError } from "@solwallet/core";
+import { parseTransactionError, type ParsedProgramError } from "@sol-wallet/core";
 import { z, ZodError } from "zod";
 
 import { makeSanitizer } from "./output.js";

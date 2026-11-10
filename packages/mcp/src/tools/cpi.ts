@@ -2,9 +2,9 @@
  * CPI forwarder tools (PRD T-I): move tokens through the `solwallet_cpi`
  * program so the TransferChecked lands as an *inner* instruction — the only
  * way to produce CPI-originated token movements on demand for exercising
- * inspect_transaction. All logic lives in @solwallet/core (transfer/cpi.ts).
+ * inspect_transaction. All logic lives in @sol-wallet/core (transfer/cpi.ts).
  */
-import { cpiTokenTransfer } from "@solwallet/core";
+import { cpiTokenTransfer } from "@sol-wallet/core";
 import { PublicKey } from "@solana/web3.js";
 
 import { baseUnitParam, DECIMALS_OPTIONAL_DESC, display, parseBaseUnits, resolveDecimals, solDisplay } from "../amounts.js";

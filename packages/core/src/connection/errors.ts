@@ -1,5 +1,5 @@
 /**
- * Structured error taxonomy for @solwallet/core.
+ * Structured error taxonomy for @sol-wallet/core.
  *
  * Every error carries a machine-readable `code` and a human/AI-readable
  * `hint` describing the recommended remediation — this lets MCP clients

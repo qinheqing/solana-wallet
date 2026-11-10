@@ -20,7 +20,7 @@ import {
 import { Keypair, PublicKey, type Connection } from "@solana/web3.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ClusterConnection, resolveClusterTarget } from "@solwallet/core";
+import { ClusterConnection, resolveClusterTarget } from "@sol-wallet/core";
 import { buildMcpServer } from "./server.js";
 
 const WITHDRAW_FIXTURE = new URL(

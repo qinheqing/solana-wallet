@@ -13,7 +13,7 @@ import {
   inspectTokenAccount,
   inspectTransaction,
   type TransactionInspection,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 
 import { PublicKey } from "@solana/web3.js";
 

@@ -1,7 +1,27 @@
 {
-  "name": "@solwallet/core",
+  "name": "@sol-wallet/core",
   "version": "0.1.0",
   "description": "Core Solana wallet testing library — connections, wallets, transfers, tokens, multisig. Zero UI dependencies.",
+  "keywords": [
+    "solana",
+    "wallet",
+    "spl-token",
+    "token-2022",
+    "multisig",
+    "squads",
+    "testing"
+  ],
+  "license": "MIT",
+  "author": "qinheqing",
+  "homepage": "https://github.com/qinheqing/solana-wallet#readme",
+  "bugs": {
+    "url": "https://github.com/qinheqing/solana-wallet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qinheqing/solana-wallet.git",
+    "directory": "packages/core"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,7 +32,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -20,7 +42,8 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --project tsconfig.json",
-    "test": "vitest run --root ../.. packages/core"
+    "test": "vitest run --root ../.. packages/core",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
@@ -36,5 +59,8 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

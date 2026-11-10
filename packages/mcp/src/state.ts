@@ -5,7 +5,7 @@
  * safe default for a testing tool; persisting keys is an explicit user
  * action via export_secret.
  */
-import { ClusterConnection, createConnection } from "@solwallet/core";
+import { ClusterConnection, createConnection } from "@sol-wallet/core";
 import type { Keypair } from "@solana/web3.js";
 
 export type WalletOrigin = "generated" | "keyfile" | "mnemonic";

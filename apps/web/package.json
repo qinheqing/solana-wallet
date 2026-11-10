@@ -1,5 +1,5 @@
 {
-  "name": "@solwallet/web",
+  "name": "@sol-wallet/web",
   "version": "0.1.0",
   "private": true,
   "description": "Web UI for Solana wallet testing",
@@ -11,7 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@solwallet/core": "workspace:*",
+    "@sol-wallet/core": "workspace:*",
     "@solana/web3.js": "^1.98.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -22,7 +22,7 @@ import {
   shortAddress,
   type ClusterConnection,
   type ParsedProgramError,
-} from "@solwallet/core";
+} from "@sol-wallet/core";
 
 export const RPC_URL = process.env.SOLWALLET_RPC_URL ?? "http://127.0.0.1:8899";
 export const KEYPAIR_PATH =

@@ -1,4 +1,4 @@
-import type { EncryptedKeystoreV1 } from "@solwallet/core";
+import type { EncryptedKeystoreV1 } from "@sol-wallet/core";
 
 /** `localnet` = a solana-test-validator proxied by the dev server at /rpc (+ /rpc-ws). */
 export type ClusterName = "mainnet-beta" | "devnet" | "testnet" | "localnet" | "custom";

@@ -15,7 +15,7 @@ import {
 import { Keypair, PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
 import { describe, expect, it, vi } from "vitest";
 
-import { ClusterConnection, importFromMnemonic, resolveClusterTarget } from "@solwallet/core";
+import { ClusterConnection, importFromMnemonic, resolveClusterTarget } from "@sol-wallet/core";
 // Byte-faithful mint / token-account buffers (test-only, not part of core's public API).
 import {
   accountBase,
