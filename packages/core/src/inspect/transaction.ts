@@ -70,6 +70,36 @@ export interface TokenBalanceChange {
   delta: string;
 }
 
+export type SolMovementType =
+  | "transfer"
+  | "transferWithSeed"
+  | "createAccount"
+  | "createAccountWithSeed"
+  | "withdrawNonceAccount";
+
+/** Native SOL moved by a System Program instruction (top-level or CPI). */
+export interface SolMovement {
+  instructionIndex: number;
+  innerIndex: number | null;
+  isInner: boolean;
+  instructionType: SolMovementType;
+  source: string | null;
+  destination: string | null;
+  /** Lamports, as a decimal string. */
+  lamports: string;
+}
+
+/** Per-account lamport change from meta.preBalances / postBalances (non-zero only). */
+export interface SolBalanceChange {
+  account: string;
+  /** The fee payer's delta includes the transaction fee. */
+  isFeePayer: boolean;
+  /** Lamports. */
+  pre: string;
+  post: string;
+  delta: string;
+}
+
 export interface TransactionInspection {
   signature: string;
   slot: number;
@@ -81,6 +111,8 @@ export interface TransactionInspection {
   explorerUrl: string | null;
   movements: TokenMovement[];
   balanceChanges: TokenBalanceChange[];
+  solMovements: SolMovement[];
+  solBalanceChanges: SolBalanceChange[];
   warnings: string[];
 }
 
@@ -126,11 +158,14 @@ interface ParsedTxJson {
     err: unknown;
     fee: number;
     innerInstructions?: Array<{ index: number; instructions: ParsedIx[] }> | null;
+    preBalances?: number[] | null;
+    postBalances?: number[] | null;
     preTokenBalances?: TokenBalanceEntry[] | null;
     postTokenBalances?: TokenBalanceEntry[] | null;
   } | null;
 }
 
+const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const T22 = TOKEN_2022_PROGRAM_ID.toBase58();
 const SPL = TOKEN_PROGRAM_ID.toBase58();
 
@@ -378,6 +413,61 @@ export function inspectParsedTransaction(
     movements.push(m);
   }
 
+  // --- native SOL -------------------------------------------------------------
+  const solMovements: SolMovement[] = [];
+  for (const { ix, index, innerIndex } of allIxs) {
+    if (ix.programId !== SYSTEM_PROGRAM) continue;
+    const parsed = typeof ix.parsed === "object" ? ix.parsed : undefined;
+    const type = parsed?.type;
+    const info = parsed?.info ?? {};
+    let source: string | null;
+    let destination: string | null;
+    switch (type) {
+      case "transfer":
+      case "transferWithSeed":
+        source = str(info.source);
+        destination = str(info.destination);
+        break;
+      case "createAccount":
+      case "createAccountWithSeed":
+        source = str(info.source);
+        destination = str(info.newAccount);
+        break;
+      case "withdrawNonceAccount":
+        source = str(info.nonceAccount);
+        destination = str(info.destination);
+        break;
+      default:
+        continue; // assign / allocate / nonce advance… move no lamports
+    }
+    const lamports = info.lamports;
+    if (typeof lamports !== "number" && typeof lamports !== "string") continue;
+    solMovements.push({
+      instructionIndex: index,
+      innerIndex,
+      isInner: innerIndex !== null,
+      instructionType: type,
+      source,
+      destination,
+      lamports: String(lamports),
+    });
+  }
+  const solBalanceChanges: SolBalanceChange[] = [];
+  const preLamports = meta.preBalances ?? [];
+  const postLamports = meta.postBalances ?? [];
+  for (let i = 0; i < Math.min(preLamports.length, postLamports.length, keys.length); i++) {
+    const a = BigInt(preLamports[i]!);
+    const b = BigInt(postLamports[i]!);
+    if (a === b) continue;
+    solBalanceChanges.push({
+      account: keys[i]!,
+      isFeePayer: i === 0,
+      pre: a.toString(),
+      post: b.toString(),
+      delta: (b - a).toString(),
+    });
+  }
+
   // Balance deltas are whole-transaction figures: only attribute one to a
   // movement when its destination is touched by no other movement.
   const touches = new Map<string, number>();
@@ -415,7 +505,7 @@ export function inspectParsedTransaction(
         ? `custom error ${decodedError.customCode}${decodedError.name ? ` (${decodedError.name})` : ""} in instruction ${decodedError.instructionIndex}${decodedError.programId ? ` of program ${decodedError.programId}` : ""}`
         : `${decodedError.kind ?? "error"} in instruction ${decodedError.instructionIndex}`
       : JSON.stringify(meta.err);
-    warnings.push(`Transaction failed: ${label}. No token movement took effect.`);
+    warnings.push(`Transaction failed: ${label}. No token or SOL movement took effect.`);
   }
 
   return {
@@ -428,6 +518,8 @@ export function inspectParsedTransaction(
     explorerUrl: signature ? explorerUrl(signature, target) : null,
     movements,
     balanceChanges,
+    solMovements,
+    solBalanceChanges,
     warnings,
   };
 }

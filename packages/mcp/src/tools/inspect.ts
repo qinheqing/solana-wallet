@@ -91,7 +91,7 @@ export function registerInspectTools(
     "inspect_transaction",
     {
       description:
-        "Decode a transaction into token movements (program, instructionType, isInner, source/dest + owners, authority, mint, declared amount (+ amountDisplay), fee {amount, source: instruction | balance-delta}, balanceDelta (+ balanceDeltaDisplay)), per-account balanceChanges, decoded InstructionError (Token / Token-2022 enum name) and warnings. Pass a signature (fetched with jsonParsed, maxSupportedTransactionVersion 0) or a getTransaction JSON string (fully offline).",
+        "Decode a transaction into token movements (program, instructionType, isInner, source/dest + owners, authority, mint, declared amount (+ amountDisplay), fee {amount, source: instruction | balance-delta}, balanceDelta (+ balanceDeltaDisplay)), per-account balanceChanges, native SOL solMovements (System Program transfer / createAccount / …, lamports + lamportsDisplay) and solBalanceChanges (lamport pre/post/delta from meta; the fee payer's delta includes the fee), decoded InstructionError (Token / Token-2022 enum name) and warnings. Pass a signature (fetched with jsonParsed, maxSupportedTransactionVersion 0) or a getTransaction JSON string (fully offline).",
       inputSchema: {
         signature: z.string().optional().describe("Transaction signature to fetch. Provide this or json."),
         json: z
@@ -132,6 +132,8 @@ function withDisplays(tx: TransactionInspection) {
       balanceDeltaDisplay: display(m.balanceDelta, m.decimals),
     })),
     balanceChanges: tx.balanceChanges.map((c) => ({ ...c, deltaDisplay: display(c.delta, c.decimals) })),
+    solMovements: tx.solMovements.map((m) => ({ ...m, lamportsDisplay: solDisplay(m.lamports) })),
+    solBalanceChanges: tx.solBalanceChanges.map((c) => ({ ...c, deltaDisplay: solDisplay(c.delta) })),
   };
 }
 

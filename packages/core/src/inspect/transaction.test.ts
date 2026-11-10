@@ -141,7 +141,7 @@ describe("inspectTransaction (T-E) — real mainnet fixtures", () => {
     });
     expect(r.decodedError?.name).toBeUndefined();
     expect(r.warnings).toEqual([
-      "Transaction failed: custom error 20 in instruction 2 of program FLUXubRmkEi2q6K3Y9kBPg9248ggaZVsoSFhtJHSrm1X. No token movement took effect.",
+      "Transaction failed: custom error 20 in instruction 2 of program FLUXubRmkEi2q6K3Y9kBPg9248ggaZVsoSFhtJHSrm1X. No token or SOL movement took effect.",
     ]);
     expect(r.movements).toEqual([]);
     expect(r.balanceChanges.every((b) => b.delta === "0")).toBe(true);
@@ -225,3 +225,29 @@ describe("inspectTransaction — plumbing", () => {
     expect(explorerUrl("S", {})).toBeNull();
   });
 });
+
+describe("native SOL", () => {
+  it("system transfer (testnet fixture): solMovements + solBalanceChanges, no token rows", () => {
+    const r = inspectParsedTransaction(fixture("sol-transfer"), { cluster: "testnet" });
+    expect(r.movements).toEqual([]);
+    expect(r.balanceChanges).toEqual([]);
+    expect(r.solMovements).toEqual([
+      {
+        instructionIndex: 2,
+        innerIndex: null,
+        isInner: false,
+        instructionType: "transfer",
+        source: "6Y3n7Y5mH6X2XDeAecGdHCVR6r6kPZxJSJabd5kW98Vr",
+        destination: "J6ombbZhxhPBf11UPP2vdQZYKvcWB3NgcSDF27A1Hpfj",
+        lamports: "5000000",
+      },
+    ]);
+    expect(r.solBalanceChanges).toEqual([
+      { account: "6Y3n7Y5mH6X2XDeAecGdHCVR6r6kPZxJSJabd5kW98Vr", isFeePayer: true, pre: "20805240", post: "15800240", delta: "-5005000" },
+      { account: "J6ombbZhxhPBf11UPP2vdQZYKvcWB3NgcSDF27A1Hpfj", isFeePayer: false, pre: "0", post: "5000000", delta: "5000000" },
+    ]);
+    // payer delta = −(amount + fee)
+    expect(BigInt(r.solBalanceChanges[0]!.delta)).toBe(-(5000000n + BigInt(r.fee)));
+  });
+});
+

@@ -117,7 +117,7 @@ description: Solana 钱包与转账测试工具集（solwallet MCP server）。�
 | `request_airdrop` | `lamports` | `solDisplay` |
 | `get_balances` | `solLamports`、`tokens[].amount` | `solDisplay`、`tokens[].display` |
 | `inspect_mint` / `inspect_token_account` | `supply` / `amount`、`delegatedAmount` | `supplyDisplay` / `amountDisplay`、`delegatedAmountDisplay` |
-| `inspect_transaction` | `fee`、`movements[].amount` / `fee.amount` / `balanceDelta`、`balanceChanges[].delta` | `feeDisplay`、`amountDisplay` / `feeDisplay` / `balanceDeltaDisplay`、`deltaDisplay` |
+| `inspect_transaction` | `fee`、`movements[].amount` / `fee.amount` / `balanceDelta`、`balanceChanges[].delta`、`solMovements[].lamports`、`solBalanceChanges[].delta` | `feeDisplay`、`amountDisplay` / `feeDisplay` / `balanceDeltaDisplay`、`deltaDisplay`、`lamportsDisplay`、`deltaDisplay` |
 | `create_token` / `manage_token2022`（mint / burn） | `mintTo.amount` / `amount`、`feeLamports` | `amountDisplay`、`feeDisplay` |
 
 小数值（computeUnitPrice、以 base units 计的 `fee` 输入等）没有提示字段，raw 数字本身就够读。
